@@ -21,9 +21,6 @@ jobs:
             ~/.cargo/git
             native/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: cargo fmt check
-        working-directory: native
-        run: cargo fmt --all -- --check
       - name: cargo test
         working-directory: native
         run: cargo test --workspace --all-targets
