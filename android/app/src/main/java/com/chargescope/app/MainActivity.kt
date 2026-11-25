@@ -253,7 +253,7 @@ private fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: (
 private fun DataTab(ui: UiState) {
     val ctx: Context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var root by remember { mutableStateOf(Prefs.rootEnabled(ctx)) }
+    var root by remember(ui.rootError) { mutableStateOf(Prefs.rootEnabled(ctx)) }
     var interval by remember { mutableStateOf(Prefs.intervalMs(ctx)) }
     var auto by remember { mutableStateOf(Prefs.autoRecord(ctx)) }
     var maxTemp by remember { mutableStateOf(Prefs.long(ctx, Prefs.TEMP, 45L)) }
@@ -312,11 +312,27 @@ private fun DataTab(ui: UiState) {
         Text("阈值只会停止本应用的记录，不会控制或限制充电。", style = MaterialTheme.typography.bodySmall)
     }
     Section("Root 增强（默认关闭）") {
+        Text("Root 管理器：" + (RootScanner.detectProvider(ctx)?.label ?: "未检测到 Magisk / KernelSU / APatch"))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("读取 /sys/class/power_supply", Modifier.weight(1f))
             Switch(checked = root, onCheckedChange = { root = it; Prefs.setRootEnabled(ctx, it) })
         }
-        Text("仅通过 su 执行固定的只读脚本，不写任何节点。", style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(
+            onClick = {
+                msg = "正在检测…（如弹出 Root 授权请点允许）"
+                scope.launch {
+                    val r = RootScanner.scan(20)
+                    msg = if (r.error == null) "Root 可用，读到 ${r.nodes.size} 个电源节点" else r.error
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("检测 Root 授权") }
+        Text(
+            "兼容 Magisk、KernelSU、APatch：都通过标准 su 授权，请在管理器的超级用户列表里允许 ChargeScope。" +
+                "只执行固定的只读脚本（读取 sysfs），不写任何节点；授权失败会自动退避，连续失败 3 次自动关闭。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        ui.rootError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
     Section("记录与导出") {
         Text("已记录 ${ui.recordedRows} 行；数据仅保存在本机，应用没有联网权限。导出文件不含设备标识。")

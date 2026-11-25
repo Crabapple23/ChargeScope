@@ -66,26 +66,64 @@ object RootScanner {
         "for f in $FIELDS; do v=; { read -r v < \"\$d/\$f\"; } 2>/dev/null && echo \"\$f=\$v\"; done; " +
         "done"
 
-    suspend fun scan(): Result = withContext(Dispatchers.IO) {
+    suspend fun scan(timeoutSec: Long = 4): Result = withContext(Dispatchers.IO) {
         try {
-            val p = ProcessBuilder("su", "-c", SCRIPT).redirectErrorStream(false).start()
-            p.outputStream.close()
+            // Works for Magisk, KernelSU (Next/Suki) and APatch: all expose a standard `su`.
+            // The script goes through stdin (not `-c`), which every su variant accepts.
+            val p = ProcessBuilder("su").redirectErrorStream(false).start()
+            p.outputStream.bufferedWriter().use {
+                it.write("echo \"#uid=\$(id -u)\"\n")
+                it.write(SCRIPT + "\n")
+                it.write("exit\n")
+            }
             coroutineScope {
                 val out = async { p.inputStream.bufferedReader().use { it.readText() } }
                 val err = async { p.errorStream.bufferedReader().use { it.readText() } }
-                if (!p.waitFor(4, TimeUnit.SECONDS)) {
+                if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) {
                     p.destroyForcibly()
-                    return@coroutineScope Result(emptyList(), "su 执行超时（可能在等待 Root 授权）")
+                    return@coroutineScope Result(emptyList(), "su 等待超时（请在 Root 管理器弹窗中授权后重试）")
                 }
                 val text = out.await()
+                val uid = text.lineSequence().firstOrNull { it.startsWith("#uid=") }?.substring(5)?.trim()
+                if (uid != null && uid != "0") {
+                    return@coroutineScope Result(emptyList(), "su 未授予 Root 权限（uid=$uid）")
+                }
                 val nodes = parse(text)
                 if (nodes.isEmpty()) {
-                    Result(emptyList(), "Root 读取无结果：" + err.await().trim().take(100))
+                    val why = err.await().trim().take(100)
+                    Result(emptyList(), if (uid == null) "su 被拒绝或未授权" + (if (why.isEmpty()) "" else "：$why") else "未读到任何 power_supply 节点")
                 } else Result(nodes, null)
             }
         } catch (e: Exception) {
-            Result(emptyList(), "无法执行 su：" + (e.message ?: e.javaClass.simpleName))
+            Result(emptyList(), "未检测到可用的 su（未 Root，或未在 Root 管理器中授权）")
         }
+    }
+
+    enum class Provider(val label: String) {
+        MAGISK("Magisk"), KERNELSU("KernelSU"), APATCH("APatch")
+    }
+
+    private val PACKAGES = mapOf(
+        "com.topjohnwu.magisk" to Provider.MAGISK,
+        "io.github.huskydg.magisk" to Provider.MAGISK,
+        "io.github.vvb2060.magisk" to Provider.MAGISK,
+        "me.weishu.kernelsu" to Provider.KERNELSU,
+        "com.rifsxd.ksunext" to Provider.KERNELSU,
+        "io.github.sukisu.ultra" to Provider.KERNELSU,
+        "me.bmax.apatch" to Provider.APATCH,
+    )
+
+    /** Which root manager app is installed (informational only; the call path is the same). */
+    fun detectProvider(ctx: android.content.Context): Provider? {
+        val pm = ctx.packageManager
+        for ((pkg, prov) in PACKAGES) {
+            try {
+                pm.getPackageInfo(pkg, 0)
+                return prov
+            } catch (_: Exception) {
+            }
+        }
+        return null
     }
 
     internal fun parse(text: String): List<RootNode> {

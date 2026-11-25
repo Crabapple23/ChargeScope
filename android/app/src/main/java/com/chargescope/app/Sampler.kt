@@ -1,6 +1,7 @@
 package com.chargescope.app
 
 import android.content.Context
+import android.os.SystemClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -92,6 +93,9 @@ object Sampler {
     private val mutex = Mutex()
     private val ring = ArrayDeque<Snapshot>()
     private var tick = 0
+    private var rootFails = 0
+    private var rootRetryAt = 0L
+    private var rootGranted = false
     private var lastRoot: List<RootNode> = emptyList()
     private var rootError: String? = null
     @Volatile private var recording = false
@@ -115,13 +119,27 @@ object Sampler {
     suspend fun sample(ctx: Context) = mutex.withLock {
         val app = ctx.applicationContext
         if (Prefs.rootEnabled(app)) {
-            if (tick++ % ROOT_EVERY == 0) {
-                val r = RootScanner.scan()
-                lastRoot = r.nodes
-                rootError = r.error
+            val now = SystemClock.elapsedRealtime()
+            // Back off after a failure so a denied/slow su never spams the manager's prompt.
+            if (now >= rootRetryAt && tick++ % ROOT_EVERY == 0) {
+                val r = RootScanner.scan(if (rootGranted) 4 else 15)
+                if (r.error == null) {
+                    rootGranted = true; rootFails = 0
+                    lastRoot = r.nodes; rootError = null
+                } else {
+                    lastRoot = emptyList()
+                    rootError = r.error
+                    rootRetryAt = now + 30_000L
+                    if (++rootFails >= 3) {
+                        Prefs.setRootEnabled(app, false)
+                        rootError = r.error + "（连续失败 3 次，已自动关闭 Root 增强）"
+                        rootFails = 0; rootGranted = false
+                    }
+                }
             }
         } else {
             lastRoot = emptyList(); rootError = null; tick = 0
+            rootFails = 0; rootRetryAt = 0L; rootGranted = false
         }
         withContext(Dispatchers.Default) {
             val s = Collector.battery(app).copy(rootNodes = lastRoot)
