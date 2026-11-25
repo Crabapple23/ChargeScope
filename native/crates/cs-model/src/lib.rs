@@ -57,7 +57,7 @@ pub enum AnalysisStatus {
 
 /// Protocols considered by the inference engine. Listing a protocol does NOT
 /// mean this build can recognise it; recognition requires verified evidence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, uniffi::Enum)]
 pub enum Protocol {
     Pd,
     PdPps,
