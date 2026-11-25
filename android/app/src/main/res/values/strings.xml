@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ChargeScope</string>
+    <string name="channel_sampling_name">充电采样服务</string>
+    <string name="channel_sampling_desc">后台采集电池与充电状态数据</string>
+    <string name="notification_sampling">ChargeScope 正在采集充电数据</string>
+    <string name="unavailable">不可用</string>
+    <string name="unknown">未知</string>
+</resources>

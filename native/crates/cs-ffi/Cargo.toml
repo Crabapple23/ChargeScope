@@ -1,0 +1,17 @@
+[package]
+name = "cs-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "chargescope"
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+cs-model.workspace = true
+cs-core.workspace = true
+cs-collector.workspace = true
+cs-analyzer.workspace = true
+uniffi.workspace = true
