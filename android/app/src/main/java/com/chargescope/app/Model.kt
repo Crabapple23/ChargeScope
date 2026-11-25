@@ -58,4 +58,5 @@ data class UiState(
     val recording: Boolean = false,
     val recordedRows: Long = 0,
     val rootError: String? = null,
+    val notice: String? = null,
 )

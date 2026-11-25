@@ -12,16 +12,24 @@ import java.io.File
 import java.io.FileWriter
 
 object Prefs {
+    const val TEMP = "max_temp_c"
+    const val MINUTES = "max_minutes"
+    const val SOC = "stop_soc"
+    const val FILE_MB = "max_file_mb"
+
     private fun sp(c: Context) = c.applicationContext.getSharedPreferences("cs", Context.MODE_PRIVATE)
+    fun long(c: Context, k: String, d: Long): Long = sp(c).getLong(k, d)
+    fun setLong(c: Context, k: String, v: Long) = sp(c).edit().putLong(k, v).apply()
     fun intervalMs(c: Context): Long = sp(c).getLong("interval", 2000L)
     fun setIntervalMs(c: Context, v: Long) = sp(c).edit().putLong("interval", v).apply()
     fun rootEnabled(c: Context): Boolean = sp(c).getBoolean("root", false)
     fun setRootEnabled(c: Context, v: Boolean) = sp(c).edit().putBoolean("root", v).apply()
+    fun autoRecord(c: Context): Boolean = sp(c).getBoolean("auto", false)
+    fun setAutoRecord(c: Context, v: Boolean) = sp(c).edit().putBoolean("auto", v).apply()
 }
 
 /** Append-only CSV with buffered writes (flush every few rows) and a size cap. */
 object Recorder {
-    private const val MAX_BYTES = 8L * 1024 * 1024
     private const val HEADER =
         "wall_ms,elapsed_ms,level_pct,status,plugged,voltage_mv,temp_decic,current_ua," +
             "current_avg_ua,charge_counter_uah,battery_power_mw_est,input_voltage_uv,input_current_ua,usb_type"
@@ -35,7 +43,8 @@ object Recorder {
     fun open(ctx: Context) {
         if (writer != null) return
         val f = file(ctx)
-        if (f.length() > MAX_BYTES) {
+        // Rotate an oversized file left from earlier sessions.
+        if (f.length() > Prefs.long(ctx, Prefs.FILE_MB, 8L) * 1024 * 1024) {
             val old = File(f.parentFile, "records.old.csv")
             old.delete()
             f.renameTo(old)
@@ -92,7 +101,15 @@ object Sampler {
 
     fun setRecording(on: Boolean) {
         recording = on
-        _state.value = _state.value.copy(recording = on, recordedRows = Recorder.rows)
+        _state.value = _state.value.copy(
+            recording = on,
+            recordedRows = Recorder.rows,
+            notice = if (on) null else _state.value.notice,
+        )
+    }
+
+    fun setNotice(text: String?) {
+        _state.value = _state.value.copy(notice = text)
     }
 
     suspend fun sample(ctx: Context) = mutex.withLock {
@@ -121,6 +138,7 @@ object Sampler {
                 recording = recording,
                 recordedRows = Recorder.rows,
                 rootError = rootError,
+                notice = _state.value.notice,
             )
         }
     }

@@ -64,6 +64,8 @@ class MainActivity : ComponentActivity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+        // Re-arm auto-record (service may have been killed); allowed because we are in the foreground.
+        if (Prefs.autoRecord(this)) SamplingService.send(this, SamplingService.ACTION_ARM)
         // Live view while the UI is visible; the background service takes over when recording.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -172,10 +174,10 @@ private fun RealtimeTab(ui: UiState) {
             KV("平均温度", fmt(m.avgTempDeci?.div(10.0), "°C", 1))
         }
     }
+    ui.notice?.let { n -> Section("提示") { Text(n) } }
     Button(
         onClick = {
-            val i = Intent(ctx, SamplingService::class.java)
-            if (ui.recording) ctx.stopService(i) else ContextCompat.startForegroundService(ctx, i)
+            SamplingService.send(ctx, if (ui.recording) SamplingService.ACTION_STOP_REC else null)
         },
         modifier = Modifier.fillMaxWidth(),
     ) { Text(if (ui.recording) "停止记录（已写入 ${ui.recordedRows} 行）" else "开始后台记录") }
@@ -238,11 +240,26 @@ private fun DeviceTab(ui: UiState) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: (Long) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { (label, v) ->
+            FilterChip(selected = selected == v, onClick = { onSelect(v) }, label = { Text(label) })
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun DataTab(ui: UiState) {
     val ctx: Context = LocalContext.current
     val scope = rememberCoroutineScope()
     var root by remember { mutableStateOf(Prefs.rootEnabled(ctx)) }
     var interval by remember { mutableStateOf(Prefs.intervalMs(ctx)) }
+    var auto by remember { mutableStateOf(Prefs.autoRecord(ctx)) }
+    var maxTemp by remember { mutableStateOf(Prefs.long(ctx, Prefs.TEMP, 45L)) }
+    var maxMin by remember { mutableStateOf(Prefs.long(ctx, Prefs.MINUTES, 120L)) }
+    var stopSoc by remember { mutableStateOf(Prefs.long(ctx, Prefs.SOC, 0L)) }
+    var maxMb by remember { mutableStateOf(Prefs.long(ctx, Prefs.FILE_MB, 8L)) }
     var msg by remember { mutableStateOf<String?>(null) }
 
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
@@ -271,6 +288,28 @@ private fun DataTab(ui: UiState) {
                 )
             }
         }
+    }
+    Section("自动记录") {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("连接充电器时自动开始，拔出后停止", Modifier.weight(1f))
+            Switch(checked = auto, onCheckedChange = {
+                auto = it
+                Prefs.setAutoRecord(ctx, it)
+                SamplingService.send(ctx, if (it) SamplingService.ACTION_ARM else SamplingService.ACTION_DISARM)
+            })
+        }
+        Text("开启后会常驻一条低优先级通知（空闲时不采样）。系统重启后需打开一次应用以恢复。", style = MaterialTheme.typography.bodySmall)
+    }
+    Section("安全阈值（任一触发即停止记录）") {
+        Text("电池温度上限", style = MaterialTheme.typography.labelLarge)
+        Chips(listOf("40 °C" to 40L, "42 °C" to 42L, "45 °C" to 45L, "50 °C" to 50L), maxTemp) { maxTemp = it; Prefs.setLong(ctx, Prefs.TEMP, it) }
+        Text("单次最长时长", style = MaterialTheme.typography.labelLarge)
+        Chips(listOf("30 分钟" to 30L, "1 小时" to 60L, "2 小时" to 120L, "不限" to 0L), maxMin) { maxMin = it; Prefs.setLong(ctx, Prefs.MINUTES, it) }
+        Text("电量达到后停止", style = MaterialTheme.typography.labelLarge)
+        Chips(listOf("80%" to 80L, "90%" to 90L, "100%" to 100L, "不限" to 0L), stopSoc) { stopSoc = it; Prefs.setLong(ctx, Prefs.SOC, it) }
+        Text("记录文件大小上限", style = MaterialTheme.typography.labelLarge)
+        Chips(listOf("4 MB" to 4L, "8 MB" to 8L, "16 MB" to 16L), maxMb) { maxMb = it; Prefs.setLong(ctx, Prefs.FILE_MB, it) }
+        Text("阈值只会停止本应用的记录，不会控制或限制充电。", style = MaterialTheme.typography.bodySmall)
     }
     Section("Root 增强（默认关闭）") {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
