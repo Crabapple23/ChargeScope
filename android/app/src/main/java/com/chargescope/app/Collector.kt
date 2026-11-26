@@ -71,12 +71,13 @@ object RootScanner {
             "constant_charge_current charge_counter charge_full charge_full_design soh cycle_count " +
             "quick_charge_type pd_active pd_verifed pd_verified pd_authenticated apdo_max " +
             "tx_adapter adapter_type fastcharge_mode pd_type pe_type " +
+            "hv_charger_status pd_max_power fcp_status scp_status voocchg_ing fastchg_type chg_type " +
             "vbus_now ibus_now sc_bus_voltage sc_bus_current ti_bus_voltage ti_bus_current bus_voltage bus_current"
 
     private const val VENDOR_FIELDS =
         "quick_charge_type pd_active pd_verifed pd_verified pd_authenticated apdo_max power_max " +
             "adapter_svid tx_adapter adapter_type real_type soh cycle_count vbus_now ibus_now " +
-            "bq2597x_bus_voltage bq2597x_bus_current fastchg_type voocchg_ing"
+            "bq2597x_bus_voltage bq2597x_bus_current fastchg_type voocchg_ing chg_type fcp_status scp_status"
 
     // Fixed read-only script: power_supply + Type-C/PD stack + vendor dirs + dumpsys battery.
     private val SCRIPT = "echo \"#uid=\$(id -u)\"; " +
@@ -85,7 +86,7 @@ object RootScanner {
         "echo \"@@\${d##*/}\"; " +
         "for f in $FIELDS; do v=; { read -r v < \"\$d/\$f\"; } 2>/dev/null && [ -n \"\$v\" ] && echo \"\$f=\$v\"; done; " +
         "done; " +
-        "for vd in /sys/class/qcom-battery /sys/class/xm_power /sys/class/oplus_chg; do " +
+        "for vd in /sys/class/qcom-battery /sys/class/xm_power /sys/class/oplus_chg /sys/class/oplus_chg/usb /sys/class/oplus_chg/battery /sys/class/cms_class /sys/class/hw_power; do " +
         "[ -d \"\$vd\" ] || continue; " +
         "echo \"@@\${vd##*/}\"; " +
         "for f in $VENDOR_FIELDS; do v=; { read -r v < \"\$vd/\$f\"; } 2>/dev/null && [ -n \"\$v\" ] && echo \"\$f=\$v\"; done; " +
@@ -113,7 +114,7 @@ object RootScanner {
 
     // On-demand read-only deep probe: enumerates all readable small sysfs files in charging dirs.
     private val DEEP_PROBE_SCRIPT = "echo \"#uid=\$(id -u)\"; " +
-        "for root in /sys/class/power_supply/* /sys/class/typec/* /sys/class/qcom-battery /sys/class/xm_power /sys/class/oplus_chg; do " +
+        "for root in /sys/class/power_supply/* /sys/class/typec/* /sys/class/qcom-battery /sys/class/xm_power /sys/class/oplus_chg /sys/class/oplus_chg/* /sys/class/cms_class /sys/class/hw_power; do " +
         "[ -d \"\$root\" ] || continue; " +
         "echo \"=== \$root ===\"; " +
         "for f in \"\$root\"/*; do " +

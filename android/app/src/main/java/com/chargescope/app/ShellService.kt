@@ -134,6 +134,8 @@ class ShellService : IShellService.Stub() {
             "quick_charge_type", "pd_active", "pd_verifed", "pd_verified",
             "pd_authenticated", "apdo_max", "tx_adapter", "adapter_type",
             "fastcharge_mode", "pd_type", "pe_type",
+            "hv_charger_status", "pd_max_power", "fcp_status", "scp_status",
+            "voocchg_ing", "fastchg_type", "chg_type",
             "vbus_now", "ibus_now", "sc_bus_voltage", "sc_bus_current",
             "ti_bus_voltage", "ti_bus_current", "bus_voltage", "bus_current",
         )
@@ -141,13 +143,17 @@ class ShellService : IShellService.Stub() {
             "/sys/class/qcom-battery",
             "/sys/class/xm_power",
             "/sys/class/oplus_chg",
+            "/sys/class/oplus_chg/usb",
+            "/sys/class/oplus_chg/battery",
+            "/sys/class/cms_class",
+            "/sys/class/hw_power",
         )
         val VENDOR_FIELDS = arrayOf(
             "quick_charge_type", "pd_active", "pd_verifed", "pd_verified",
             "pd_authenticated", "apdo_max", "power_max", "adapter_svid",
             "tx_adapter", "adapter_type", "real_type", "soh", "cycle_count",
             "vbus_now", "ibus_now", "bq2597x_bus_voltage", "bq2597x_bus_current",
-            "fastchg_type", "voocchg_ing",
+            "fastchg_type", "voocchg_ing", "chg_type", "fcp_status", "scp_status",
         )
     }
 }

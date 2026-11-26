@@ -120,6 +120,26 @@ class AnalyzerTest {
         assertEquals(8_883_000L, Analyzer.input(s).voltageUv)
     }
 
+    @Test fun samsungSfcAndOppoVoocConfirmed() {
+        val sec = RootNode("battery", mapOf("type" to "Battery", "hv_charger_status" to "3"))
+        val a1 = Analyzer.analyze(listOf(snap(listOf(sec))), "samsung")
+        assertEquals(Status.CONFIRMED, a1.status)
+        assertEquals("三星 SFC 2.0 (45W PPS)", a1.driver)
+
+        val oplus = RootNode("oplus_chg", mapOf("voocchg_ing" to "1"))
+        val a2 = Analyzer.analyze(listOf(snap(listOf(oplus))), "OPPO")
+        assertEquals(Status.CONFIRMED, a2.status)
+        assertEquals("OPPO VOOC / SuperVOOC", a2.driver)
+    }
+
+    @Test fun trickleChargeSkipsLiveSpecTableMatch() {
+        val usb = RootNode("usb", mapOf("type" to "USB", "online" to "1", "voltage_now" to "9000000", "current_now" to "700000"))
+        val fullSnap = snap(listOf(usb)).copy(levelPct = 100)
+        val a = Analyzer.analyze(listOf(fullSnap), "Xiaomi")
+        assertTrue(a.limitations.any { "降流" in it })
+        assertTrue(a.candidates.none { "AFC" in it || "QC 2.0/3.0" in it })
+    }
+
     @Test fun parseRootOutput() {
         val nodes = RootScanner.parse("@@usb\ntype=USB\nonline=1\n@@battery\ncapacity=50\n")
         assertEquals(2, nodes.size)

@@ -239,6 +239,8 @@ object Analyzer {
 
     private val PROTOCOL_SPECS = mapOf(
         "小米 HyperCharge / Mi PPS" to "小米澎湃秒充（底层基于魔改 USB PD PPS + 私有加密认证）：典型档位 33W (11V/3A)、67W (11V/6.1A 或 20V/3.25A)、90W (20V/4.5A)、120W (20V/6A)；需原厂或获授权 6A 线缆。",
+        "OPPO VOOC / SuperVOOC" to "OPPO / 一加 / realme 私有闪充：30W (5V/6A)、65W (10V/6.5A)、80W (11V/7.3A)、100W (11V/9.1A)、150W (20V/7.5A)、240W (20V/12A)；需原厂/认证大电流线缆。",
+        "三星 SFC" to "三星超快速充电（遵循标准 USB PD 3.0 PPS）：SFC 1.0 为 25W (9V/2.77A)，SFC 2.0 为 45W (11V/4.05A 或 9V/5A，需 5A E-Marker 线缆)。",
         "SuperVOOC" to "典型档位：10V/6.5A (65W)、11V/7.3A (80W)、11V/9.1A (100W)、20V/7.5A (150W)、20V/12A (240W)；串联双电芯 + 电荷泵分压；私有加密握手，需原厂/认证大电流线缆。",
         "VOOC" to "典型档位：5V/4A (20W)、5V/6A (30W) 低压大电流直充；需支持大电流的专用线缆。",
         "Warp Charge" to "VOOC 体系演进，典型档位：5V/6A (30W)、10V/6.5A (65W)；需原厂/认证大电流线缆。",
@@ -440,6 +442,43 @@ object Analyzer {
                 if (cur == null || 2 > cur.rank) l4["PD"] = Cls(miLabel, "PD", true, 2)
                 candidates += "★$miLabel（已认证）"
             }
+            // OPPO / OnePlus / realme VOOC / SuperVOOC
+            if (n.props["voocchg_ing"]?.trim() == "1") {
+                evidence += Evidence(4, "${n.name}/voocchg_ing = 1 → OPPO VOOC / SuperVOOC")
+                val cur = l4["VOOC"]
+                if (cur == null || 2 > cur.rank) l4["VOOC"] = Cls("OPPO VOOC / SuperVOOC", "VOOC", true, 2)
+                candidates += "★OPPO VOOC / SuperVOOC（已认证）"
+            }
+            n.props["fastchg_type"]?.trim()?.takeIf { it.isNotEmpty() && it != "0" }?.let { ft ->
+                evidence += Evidence(4, "${n.name}/fastchg_type = $ft（厂商私有快充枚举，原始值）")
+            }
+            // Samsung SFC / AFC (`sec_battery` hv_charger_status: 1=AFC, 2=25W SFC 1.0, 3=45W SFC 2.0)
+            n.props["hv_charger_status"]?.trim()?.toIntOrNull()?.takeIf { it > 0 }?.let { hv ->
+                val (sLabel, sFamily, sRank) = when (hv) {
+                    3 -> Triple("三星 SFC 2.0 (45W PPS)", "PD", 2)
+                    2 -> Triple("三星 SFC 1.0 (25W PPS)", "PD", 2)
+                    1 -> Triple("三星 AFC / 高压快充", "AFC", 1)
+                    else -> Triple("三星快充状态 $hv", "PD", 1)
+                }
+                evidence += Evidence(4, "${n.name}/hv_charger_status = $hv → $sLabel")
+                val cur = l4[sFamily]
+                if (cur == null || sRank > cur.rank) l4[sFamily] = Cls(sLabel, sFamily, true, sRank)
+                candidates += "★$sLabel"
+            }
+            n.props["pd_max_power"]?.trim()?.toIntOrNull()?.takeIf { it > 0 }?.let { mw ->
+                val w = if (mw > 1000) mw / 1000 else mw
+                evidence += Evidence(4, "${n.name}/pd_max_power = ${w}W")
+            }
+            // Huawei / Honor SCP / FCP
+            if (n.props["scp_status"]?.trim() == "1") {
+                evidence += Evidence(4, "${n.name}/scp_status = 1 → Huawei SCP")
+                val cur = l4["SCP"]
+                if (cur == null || 1 > cur.rank) l4["SCP"] = Cls("Huawei SCP", "SCP", true, 1)
+            } else if (n.props["fcp_status"]?.trim() == "1") {
+                evidence += Evidence(4, "${n.name}/fcp_status = 1 → Huawei FCP")
+                val cur = l4["FCP"]
+                if (cur == null || 1 > cur.rank) l4["FCP"] = Cls("Huawei FCP", "FCP", true, 1)
+            }
             if (!isInputNode(n)) continue
             for (key in PROTOCOL_KEYS) {
                 val raw = n.props[key] ?: continue
@@ -548,10 +587,14 @@ object Analyzer {
             candidates += "★$ext（宣告电压超出标准 PPS 上限，疑为厂商扩展）"
         }
 
+        val trickle = (last.levelPct ?: 0) >= 95 || (bestP > 0 && bestI < 1.0)
         val matched = when {
-            bestP > 0 && bestV > 5.5 && bestI >= 0.5 -> match(bestV, bestI, brand)
+            !trickle && bestP > 0 && bestV > 5.5 && bestI >= 1.0 -> match(bestV, bestI, brand)
             advV != null && advV > 5_500_000L && advI != null -> match(advV / 1e6, advI / 1e6, brand, "（宣告值）")
             else -> emptyList()
+        }
+        if (trickle && bestP > 0) {
+            limits += "当前处于满电或低电流降流阶段（电量 ${last.levelPct ?: "—"}%），已跳过实时电流规格表匹配以避免误判。"
         }
         if (matched.isNotEmpty()) {
             evidence += Evidence(3, "电压/电流与规格表档位接近：" + matched.take(4).joinToString("、") + "（仅缩小范围）")
