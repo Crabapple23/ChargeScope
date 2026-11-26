@@ -152,6 +152,8 @@ object Report {
         ui.analysis?.let { a ->
             line("## 当前识别结果：${a.status.label}")
             line(a.headline)
+            line("驱动报告协议：${a.driver ?: "未报告"}；预测协议：${a.predicted ?: "无法预测"}")
+            if (a.description.isNotEmpty()) line("描述：${a.description}")
             a.evidence.sortedByDescending { it.level }.forEach { line("L${it.level} ${it.text}") }
             if (a.candidates.isNotEmpty()) line("候选：" + a.candidates.joinToString("；"))
             a.limitations.forEach { line("限制：$it") }

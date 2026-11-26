@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -276,7 +277,14 @@ private fun PowerChart(series: Series) {
 private fun ProtocolTab(ui: UiState) {
     val a = ui.analysis
     if (a == null) { Text("等待首次采样…"); return }
-    Section("结论：${a.status.label}") { Text(a.headline, style = MaterialTheme.typography.titleSmall) }
+    Section("结论：${a.status.label}") {
+        Text(a.headline, style = MaterialTheme.typography.titleSmall)
+        KV("驱动报告协议", a.driver ?: "未报告")
+        KV("预测协议", a.predicted ?: "无法预测")
+    }
+    if (a.description.isNotEmpty()) {
+        Section("描述") { Text(a.description) }
+    }
     if (a.candidates.isNotEmpty()) {
         Section("候选协议（仅缩小范围，★ 为与本机品牌一致）") { a.candidates.forEach { Text("• $it") } }
     }
@@ -364,6 +372,28 @@ private fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: (
 }
 
 @Composable
+private fun Fold(title: String, summary: String, expanded: Boolean, onToggle: () -> Unit, content: @Composable () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                if (!expanded) Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (expanded) "▾" else "▸")
+            }
+            if (expanded) {
+                Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun DataTab(ui: UiState) {
     val ctx: Context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -377,6 +407,10 @@ private fun DataTab(ui: UiState) {
     var maxMb by remember { mutableStateOf(Prefs.long(ctx, Prefs.FILE_MB, 8L)) }
     var msg by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
+    // Accordion: only one block open at a time; all collapsed by default.
+    var open by remember { mutableStateOf<String?>(null) }
+    val toggle = { t: String -> open = if (open == t) null else t }
+    msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
     val exportCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) scope.launch {
@@ -406,10 +440,10 @@ private fun DataTab(ui: UiState) {
         }
     }
 
-    Section("采样间隔") {
+    Fold("采样间隔", "${interval / 1000} 秒", open == "采样间隔", { toggle("采样间隔") }) {
         Chips(listOf("1 秒" to 1000L, "2 秒" to 2000L, "5 秒" to 5000L), interval) { interval = it; Prefs.setIntervalMs(ctx, it) }
     }
-    Section("自动记录") {
+    Fold("自动记录", if (auto) "已开启" else "已关闭", open == "自动记录", { toggle("自动记录") }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("连接充电器时自动开始，拔出后停止", Modifier.weight(1f))
             Switch(checked = auto, onCheckedChange = {
@@ -420,7 +454,11 @@ private fun DataTab(ui: UiState) {
         }
         Text("开启后会常驻一条低优先级通知（空闲时不采样）。系统重启后需打开一次应用以恢复。", style = MaterialTheme.typography.bodySmall)
     }
-    Section("安全阈值（任一触发即停止记录）") {
+    Fold(
+        "安全阈值（任一触发即停止记录）",
+        "${maxTemp}°C · " + (if (maxMin > 0) "${maxMin}分" else "不限时") + " · " + (if (stopSoc > 0) "${stopSoc}%" else "不限电量") + " · ${maxMb}MB",
+        open == "安全阈值", { toggle("安全阈值") },
+    ) {
         Text("电池温度上限", style = MaterialTheme.typography.labelLarge)
         Chips(listOf("40 °C" to 40L, "42 °C" to 42L, "45 °C" to 45L, "50 °C" to 50L), maxTemp) { maxTemp = it; Prefs.setLong(ctx, Prefs.TEMP, it) }
         Text("单次最长时长", style = MaterialTheme.typography.labelLarge)
@@ -431,7 +469,11 @@ private fun DataTab(ui: UiState) {
         Chips(listOf("4 MB" to 4L, "8 MB" to 8L, "16 MB" to 16L), maxMb) { maxMb = it; Prefs.setLong(ctx, Prefs.FILE_MB, it) }
         Text("阈值只会停止本应用的记录，不会控制或限制充电。", style = MaterialTheme.typography.bodySmall)
     }
-    Section("特权增强（默认关闭，只读）") {
+    Fold(
+        "特权增强（默认关闭，只读）",
+        when (mode) { 1L -> "Root"; 2L -> "Shizuku"; else -> "关闭" },
+        open == "特权增强", { toggle("特权增强") },
+    ) {
         Chips(listOf("关闭" to 0L, "Root" to 1L, "Shizuku" to 2L), mode) {
             mode = it; Prefs.setPrivMode(ctx, it.toInt()); shz = ShizukuBridge.state()
         }
@@ -474,7 +516,7 @@ private fun DataTab(ui: UiState) {
         )
         ui.rootError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
-    Section("记录与日志") {
+    Fold("记录与日志", "${ui.recordedRows} 行", open == "记录与日志", { toggle("记录与日志") }) {
         Text("已记录 ${ui.recordedRows} 行；数据仅保存在本机，应用没有联网权限。导出文件不含设备标识。")
         Button(onClick = { exportCsv.launch("chargescope.csv") }, modifier = Modifier.fillMaxWidth()) { Text("导出 CSV 记录") }
         Button(onClick = { exportLog.launch("chargescope-log.txt") }, modifier = Modifier.fillMaxWidth()) { Text("导出诊断日志") }

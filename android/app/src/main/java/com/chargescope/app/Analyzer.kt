@@ -185,9 +185,9 @@ object Analyzer {
         ev += Evidence(3, "观察到的高压档位：" + levels.joinToString(" / ") { "%.1fV".format(it) })
         val allFixed = volts.all { v -> fixed.any { abs(v - it) <= 0.35 } }
         cand += if (allFixed) {
-            "USB PD 固定档 / QC 2.0 / AFC（电压停在固定档位）"
+            "USB PD 固定档 / QC 2.0 / AFC"
         } else {
-            "PPS / QC 3.0 / UFCS / 厂商私有（出现非标准档位或连续调压）"
+            "PPS / QC 3.0 / UFCS / 厂商私有"
         }
         val steps = ArrayList<Double>()
         for (i in 1 until vols.size) {
@@ -295,27 +295,60 @@ object Analyzer {
         if (vols.size >= 2) limits += "电压步进判断受采样间隔和驱动上报精度影响，仅作参考。"
 
         val cl = candidates.toList()
+        val driver = if (l4.isEmpty()) null else l4.values.joinToString(" / ") { it.label }
+        val predicted = matched.firstOrNull()?.removePrefix("★")?.removeSuffix("（宣告值）") ?: cl.firstOrNull()
+        val consistent = l4.values.any { c ->
+            predicted != null && (predicted.contains(c.family, true) || predicted.contains(c.label, true))
+        }
+
+        // Plain-language description combining both layers.
+        val desc = StringBuilder()
+        desc.append(
+            if (driver != null) "驱动层（sysfs 的 usb_type / type 等）报告：$driver。"
+            else "驱动层没有报告协议名称（无 Root/Shizuku，或该机型节点不提供）。",
+        )
+        if (predicted != null) {
+            val basis = ArrayList<String>()
+            if (bestV > 5.5) basis += "输入侧约 %.1f V".format(bestV) + (if (bestI > 0) "、%.2f A".format(bestI) else "")
+            else if (maxVin > 5_500_000L) basis += "输入侧出现 %.1f V 高压".format(maxVin / 1e6)
+            else if (advV != null) basis += "充电器宣告上限 %.1f V".format(advV / 1e6)
+            desc.append("根据").append(if (basis.isEmpty()) "电压档位和规格表" else basis.joinToString("、") + "及规格表")
+                .append("，预测为：$predicted。这只是缩小范围，不是确认。")
+            if (driver != null) {
+                desc.append(if (consistent) "预测与驱动报告一致。" else "预测与驱动报告不一致，请以驱动报告为准，预测仅供参考。")
+            }
+        } else {
+            desc.append("输入侧数据不足，暂时无法预测具体协议。")
+        }
+        powerMw(last)?.let {
+            desc.append("当前电池侧估算功率约 %.1f W（仅参考，不能用来确认协议）。".format(it / 1000.0))
+        }
+        val description = desc.toString()
+
+        fun mk(status: Status, headline: String, key: String) =
+            Analysis(status, headline, evidence, limits, cl, key, driver, predicted, description)
+
         return when {
-            l4.size > 1 -> Analysis(
+            l4.size > 1 -> mk(
                 Status.CONFLICT,
                 "不同节点报告了不同协议：" + l4.values.joinToString(" / ") { it.label },
-                evidence, limits, cl, "X:" + l4.values.joinToString("+") { it.label },
+                "X:" + l4.values.joinToString("+") { it.label },
             )
             l4.size == 1 -> {
                 val c = l4.values.first()
-                Analysis(
+                mk(
                     Status.CONFIRMED,
                     if (c.fast) "驱动报告：${c.label}" else "驱动报告：${c.label}（非快充）",
-                    evidence, limits, cl, "C:" + c.label,
+                    "C:" + c.label,
                 )
             }
-            maxVin > 5_500_000L || matched.isNotEmpty() -> Analysis(
+            maxVin > 5_500_000L || matched.isNotEmpty() -> mk(
                 Status.POSSIBLE,
                 (if (maxVin > 5_500_000L) "输入侧出现 %.1f V 高压，疑似快充协商".format(maxVin / 1e6) else "充电器宣告支持高压") +
-                    (if (cl.isNotEmpty()) "；候选：" + cl.take(2).joinToString("；") else "，但无法确定具体协议"),
-                evidence, limits, cl, "P:" + (cl.firstOrNull() ?: "hv"),
+                    (if (predicted != null) "；预测：$predicted" else "，但无法确定具体协议"),
+                "P:" + (predicted ?: "hv"),
             )
-            else -> Analysis(Status.UNKNOWN, "没有足够证据识别协议", evidence, limits, cl)
+            else -> mk(Status.UNKNOWN, "没有足够证据识别协议", "")
         }
     }
 

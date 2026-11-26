@@ -41,6 +41,12 @@ data class Analysis(
     val candidates: List<String> = emptyList(),
     /** Stable identity of the result, used to de-duplicate archive entries. Empty = not archivable. */
     val key: String = "",
+    /** Protocol(s) explicitly reported by the driver (L4), or null. */
+    val driver: String? = null,
+    /** Best predicted protocol from input-side evidence / spec table, or null. */
+    val predicted: String? = null,
+    /** Plain-language summary combining driver report and prediction. */
+    val description: String = "",
 )
 
 data class Metrics(
