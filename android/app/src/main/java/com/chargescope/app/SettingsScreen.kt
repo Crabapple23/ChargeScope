@@ -39,6 +39,7 @@ data class AppPrefs(
     val updateSource: Int = 0, // 0 = GitHub Releases, 1 = GitHub Actions
     val predictiveBack: Boolean = true,
     val dynamicColor: Boolean = true,
+    val oledBlack: Boolean = false,
 ) {
     val isEn: Boolean get() = lang == "en"
     val fontMultiplier: Float
@@ -66,6 +67,7 @@ object AppSettings {
             updateSource = Prefs.updateSource(ctx),
             predictiveBack = Prefs.predictiveBack(ctx),
             dynamicColor = Prefs.dynamicColor(ctx),
+            oledBlack = Prefs.oledBlack(ctx),
         )
     }
 
@@ -97,6 +99,11 @@ object AppSettings {
     fun setDynamicColor(ctx: Context, v: Boolean) {
         Prefs.setDynamicColor(ctx, v)
         _prefs.value = _prefs.value.copy(dynamicColor = v)
+    }
+
+    fun setOledBlack(ctx: Context, v: Boolean) {
+        Prefs.setOledBlack(ctx, v)
+        _prefs.value = _prefs.value.copy(oledBlack = v)
     }
 }
 
@@ -172,8 +179,27 @@ fun SettingsScreen(prefs: AppPrefs, onBack: () -> Unit) {
                     )
                 }
                 Text(
-                    if (dynSupported) tr("跟随系统壁纸自动生成主题配色，即时生效。", "Adapts colors from your system wallpaper immediately.")
+                    if (dynSupported) tr("跟随系统壁纸自动生成强调色与组件配色，即时生效。", "Adapts accent colors from your system wallpaper immediately.")
                     else tr("当前系统低于 Android 12，不支持莫奈取色。", "Requires Android 12 or higher."),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        tr("OLED 纯黑背景", "OLED Pure Black"),
+                        Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = prefs.oledBlack,
+                        onCheckedChange = { AppSettings.setOledBlack(ctx, it) },
+                    )
+                }
+                Text(
+                    tr("仅在深色模式下生效：将页面背景与系统栏设为纯黑（#000000），与莫奈取色互不冲突，可单独或同时开启。", "Dark mode only: sets backgrounds and bars to pure #000000. Independent of Dynamic Color."),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

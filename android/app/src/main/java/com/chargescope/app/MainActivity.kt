@@ -164,11 +164,26 @@ private fun App() {
         else -> isSystemInDarkTheme()
     }
     val ctx = LocalContext.current
-    val colors = when {
+    val baseColors = when {
         prefs.dynamicColor && Build.VERSION.SDK_INT >= 31 ->
             if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
         dark -> darkColorScheme()
         else -> lightColorScheme()
+    }
+    // OLED pure black overrides only surface/background layers in dark mode, preserving Monet accent colors.
+    val colors = if (dark && prefs.oledBlack) {
+        baseColors.copy(
+            background = Color.Black,
+            surface = Color.Black,
+            surfaceContainerLowest = Color.Black,
+            surfaceContainerLow = Color(0xFF0C0C0C),
+            surfaceContainer = Color(0xFF080808),
+            surfaceContainerHigh = Color(0xFF141414),
+            surfaceContainerHighest = Color(0xFF1A1A1A),
+            surfaceVariant = Color(0xFF141414),
+        )
+    } else {
+        baseColors
     }
     val view = LocalView.current
     SideEffect {

@@ -66,6 +66,9 @@ object Prefs {
 
     fun dynamicColor(c: Context): Boolean = sp(c).getBoolean("dyn_color", true)
     fun setDynamicColor(c: Context, v: Boolean) = sp(c).edit().putBoolean("dyn_color", v).apply()
+
+    fun oledBlack(c: Context): Boolean = sp(c).getBoolean("oled_black", false)
+    fun setOledBlack(c: Context, v: Boolean) = sp(c).edit().putBoolean("oled_black", v).apply()
 }
 
 /**
