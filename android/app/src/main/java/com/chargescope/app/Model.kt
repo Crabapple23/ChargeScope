@@ -47,6 +47,8 @@ data class Analysis(
     val predicted: String? = null,
     /** Plain-language summary combining driver report and prediction. */
     val description: String = "",
+    /** Electrical specification reference for the confirmed protocol (null if not confirmed). */
+    val protocolSpec: String? = null,
 )
 
 data class Metrics(

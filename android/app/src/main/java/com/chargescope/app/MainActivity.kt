@@ -320,6 +320,10 @@ private fun ProtocolTab() {
         Text(a.headline, style = MaterialTheme.typography.titleSmall)
         KV("驱动报告协议", a.driver ?: "未报告")
         KV("预测协议", a.predicted ?: "无法预测")
+        a.protocolSpec?.let { spec ->
+            Text("协议规格说明（参考上限，不代表当前实际功率）", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text(spec, style = MaterialTheme.typography.bodySmall)
+        }
     }
     if (a.description.isNotEmpty()) {
         Section("描述") { Text(a.description) }

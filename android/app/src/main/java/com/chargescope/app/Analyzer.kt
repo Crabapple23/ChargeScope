@@ -149,6 +149,24 @@ object Analyzer {
         Profile("魅族/努比亚", "红魔 NeoCharger 165W (20V/8.25A)", 20.0, 8.25),
     )
 
+    private val PROTOCOL_SPECS = mapOf(
+        "SuperVOOC" to "典型档位：10V/6.5A (65W)、11V/7.3A (80W)、11V/9.1A (100W)、20V/7.5A (150W)、20V/12A (240W)；串联双电芯 + 电荷泵分压；私有加密握手，需原厂/认证大电流线缆。",
+        "VOOC" to "典型档位：5V/4A (20W)、5V/6A (30W) 低压大电流直充；需支持大电流的专用线缆。",
+        "Warp Charge" to "VOOC 体系演进，典型档位：5V/6A (30W)、10V/6.5A (65W)；需原厂/认证大电流线缆。",
+        "UFCS" to "融合快充：电压 3.4V–21V（高阶可扩展至 36V），调压步进 10–20mV、电流步进 50mA；通用档 33W (11V/3A) / 44W (11V/4A)，高阶互认档 65W / 100W；>3A 需高载流线缆。",
+        "USB PD PPS" to "USB PD 3.0 可编程电源：3.3V–21V（标准上限 5A / 100W），电压步进 20mV、电流步进 50mA；强制 Type-C，>3A 需 5A E-Marker 线缆（部分厂商私有扩展可至 6A+）。",
+        "USB PD" to "USB PD 固定档（SPR）：5V/3A、9V/3A、15V/3A、20V/3A (60W)、20V/5A (100W)；PD 3.1 EPR 可扩展至 28V/36V/48V 5A (140W–240W)；强制 Type-C，>60W 需 5A E-Marker 线缆。",
+        "QC 3.5" to "高通 Quick Charge 3.5 / 3+：支持连续动态调压与高电流档位（典型 20W–40W+），向下兼容 QC 2.0/3.0。",
+        "QC 3.0" to "高通 Quick Charge 3.0：3.6V–20V 连续可调，INOV 调压步进 200mV，最大 3A（典型 18W–27W）。",
+        "QC 2.0" to "高通 Quick Charge 2.0：固定 5V / 9V / 12V / 20V 档位，最大 3A（典型 18W–36W），通过 D+/D- 电平切换。",
+        "MediaTek Pump Express" to "联发科 Pump Express：支持多档高压动态调压（常见 5V / 7V / 9V / 12V），通过电流脉冲通信。",
+        "Huawei SCP" to "华为/荣耀 SuperCharge：宽幅电荷泵直充，典型档位 4.5V/5A 或 10V/2.25A (22.5W)、10V/4A (40W)、11V/6A (66W)、20V/4.4A (88W)、20V/5A (100W)；>5A 需专用大电流线缆。",
+        "Huawei FCP" to "华为 Fast Charge Protocol：典型档位 9V/2A (18W) 高压快充，通过 D+/D- 通信。",
+        "DCP 标准充电口" to "USB BC 1.2 标准充电口（非快充）：5V，通常上限 1.5A–2.4A（约 7.5W–12W）。",
+        "CDP 充电下行口" to "USB 充电下行口（非快充，常见于电脑大电流口）：5V，通常上限 1.5A（约 7.5W）。",
+        "SDP 标准下行口" to "USB 标准数据口（非快充，常见于普通电脑口）：5V，通常上限 0.5A–0.9A（约 2.5W–4.5W）。",
+    )
+
     private val BRAND_PROTOCOLS = mapOf(
         "小米" to "HyperCharge / Mi PPS（魔改 PD PPS，电流上限放宽至 6A 左右）",
         "OPPO" to "VOOC / SuperVOOC（私有加密握手）",
@@ -356,8 +374,8 @@ object Analyzer {
         }
         val description = desc.toString()
 
-        fun mk(status: Status, headline: String, key: String) =
-            Analysis(status, headline, evidence, limits, cl, key, driver, predicted, description)
+        fun mk(status: Status, headline: String, key: String, spec: String? = null) =
+            Analysis(status, headline, evidence, limits, cl, key, driver, predicted, description, spec)
 
         return when {
             l4.size > 1 -> mk(
@@ -371,6 +389,7 @@ object Analyzer {
                     Status.CONFIRMED,
                     if (c.fast) "驱动报告：${c.label}" else "驱动报告：${c.label}（非快充）",
                     "C:" + c.label,
+                    PROTOCOL_SPECS[c.label],
                 )
             }
             maxVin > 5_500_000L || matched.isNotEmpty() -> mk(

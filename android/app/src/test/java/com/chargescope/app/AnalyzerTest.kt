@@ -38,6 +38,7 @@ class AnalyzerTest {
         val node = RootNode("usb", mapOf("type" to "USB_PD", "usb_type" to "SDP DCP [PD] PD_PPS", "online" to "1"))
         val a = Analyzer.analyze(listOf(snap(listOf(node))))
         assertEquals(Status.CONFIRMED, a.status)
+        assertTrue(a.protocolSpec?.contains("20V/5A") == true)
     }
 
     @Test fun highVoltageOnlyIsPossible() {
