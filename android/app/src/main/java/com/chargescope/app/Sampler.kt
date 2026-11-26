@@ -44,6 +44,22 @@ object Prefs {
 
     fun autoRecord(c: Context): Boolean = sp(c).getBoolean("auto", false)
     fun setAutoRecord(c: Context, v: Boolean) = sp(c).edit().putBoolean("auto", v).apply()
+
+    /** 0 = follow system (default), 1 = light, 2 = dark */
+    fun themeMode(c: Context): Int = sp(c).getInt("theme", 0)
+    fun setThemeMode(c: Context, v: Int) = sp(c).edit().putInt("theme", v).apply()
+
+    /** 0 = small (0.88x), 1 = normal (1.0x, default), 2 = large (1.15x), 3 = xlarge (1.3x) */
+    fun fontTier(c: Context): Int = sp(c).getInt("font_tier", 1)
+    fun setFontTier(c: Context, v: Int) = sp(c).edit().putInt("font_tier", v).apply()
+
+    /** "zh" (default) or "en" */
+    fun lang(c: Context): String = sp(c).getString("lang", "zh") ?: "zh"
+    fun setLang(c: Context, v: String) = sp(c).edit().putString("lang", v).apply()
+
+    /** 0 = GitHub Releases (default), 1 = GitHub Actions */
+    fun updateSource(c: Context): Int = sp(c).getInt("update_src", 0)
+    fun setUpdateSource(c: Context, v: Int) = sp(c).edit().putInt("update_src", v).apply()
 }
 
 /**

@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,6 +20,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +41,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -49,8 +53,11 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -66,9 +73,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -83,6 +96,7 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppSettings.load(this)
         // Initialize disk-backed stores off the main thread.
         lifecycleScope.launch(Dispatchers.IO) {
             AppLog.init(applicationContext)
@@ -113,36 +127,85 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val TABS = listOf("实时", "协议", "存档", "设备", "数据")
+private data class TabItem(val zh: String, val en: String, val icon: Int)
+
+private val TABS = listOf(
+    TabItem("实时", "Live", R.drawable.ic_tab_realtime),
+    TabItem("协议", "Protocol", R.drawable.ic_tab_protocol),
+    TabItem("存档", "Archive", R.drawable.ic_tab_archive),
+    TabItem("数据", "Data", R.drawable.ic_tab_data),
+    TabItem("设备", "Device", R.drawable.ic_tab_device),
+)
 private val GRID_FRACTIONS = floatArrayOf(0f, 0.5f, 1f)
 private val NICE_STEPS = floatArrayOf(5f, 10f, 20f, 30f, 50f, 70f, 100f, 150f, 200f, 300f)
 
 @Composable
 private fun App() {
+    val prefs by AppSettings.prefs.collectAsState()
     var tab by remember { mutableIntStateOf(0) }
-    MaterialTheme(colorScheme = darkColorScheme()) {
-        Scaffold(
-            bottomBar = {
-                NavigationBar {
-                    TABS.forEachIndexed { i, t ->
-                        NavigationBarItem(
-                            selected = tab == i,
-                            onClick = { tab = i },
-                            icon = { Text(t.take(1)) },
-                            label = { Text(t) },
-                        )
+    var showSettings by remember { mutableStateOf(false) }
+
+    val dark = when (prefs.themeMode) {
+        1 -> false
+        2 -> true
+        else -> isSystemInDarkTheme()
+    }
+    val colors = if (dark) darkColorScheme() else lightColorScheme()
+    val view = LocalView.current
+    val ctx = LocalContext.current
+    SideEffect {
+        (ctx as? ComponentActivity)?.window?.let { w ->
+            @Suppress("DEPRECATION")
+            w.statusBarColor = colors.surface.toArgb()
+            @Suppress("DEPRECATION")
+            w.navigationBarColor = colors.surface.toArgb()
+            val ctl = WindowCompat.getInsetsController(w, view)
+            ctl.isAppearanceLightStatusBars = !dark
+            ctl.isAppearanceLightNavigationBars = !dark
+        }
+    }
+
+    val baseDensity = LocalDensity.current
+    val scaledDensity = remember(baseDensity, prefs.fontTier) {
+        Density(baseDensity.density, baseDensity.fontScale * prefs.fontMultiplier)
+    }
+
+    CompositionLocalProvider(LocalDensity provides scaledDensity, LocalIsEn provides prefs.isEn) {
+        MaterialTheme(colorScheme = colors) {
+            if (showSettings) {
+                BackHandler { showSettings = false }
+                SettingsScreen(prefs = prefs, onBack = { showSettings = false })
+            } else {
+                Scaffold(
+                    bottomBar = {
+                        NavigationBar {
+                            TABS.forEachIndexed { i, t ->
+                                val label = tr(t.zh, t.en)
+                                NavigationBarItem(
+                                    selected = tab == i,
+                                    onClick = { tab = i },
+                                    icon = {
+                                        Icon(
+                                            painter = painterResource(t.icon),
+                                            contentDescription = label,
+                                        )
+                                    },
+                                    label = { Text(label) },
+                                )
+                            }
+                        }
+                    },
+                ) { pad ->
+                    // Each tab collects only the state it needs, avoiding root-level recompositions every 2s.
+                    Box(Modifier.padding(pad).fillMaxSize()) {
+                        when (tab) {
+                            0 -> ScrollBody { RealtimeTab() }
+                            1 -> ScrollBody { ProtocolTab() }
+                            2 -> ArchiveTab()
+                            3 -> ScrollBody { DataTab() }
+                            else -> ScrollBody { DeviceTab(onOpenSettings = { showSettings = true }) }
+                        }
                     }
-                }
-            },
-        ) { pad ->
-            // Each tab collects only the state it needs, avoiding root-level recompositions every 2s.
-            Box(Modifier.padding(pad).fillMaxSize()) {
-                when (tab) {
-                    0 -> ScrollBody { RealtimeTab() }
-                    1 -> ScrollBody { ProtocolTab() }
-                    2 -> ArchiveTab()
-                    3 -> ScrollBody { DeviceTab() }
-                    else -> ScrollBody { DataTab() }
                 }
             }
         }
@@ -207,35 +270,40 @@ private fun RealtimeTab() {
     val ui by Sampler.state.collectAsState()
     val ctx = LocalContext.current
     val s = ui.latest
-    Section("电池（公开 API）") {
-        KV("电量", s?.levelPct?.let { "$it %" })
-        KV("状态", statusText(s?.status))
-        KV("连接方式", s?.let { pluggedText(it.plugged) })
-        KV("电池端电压", fmt(s?.voltageMv?.let { it / 1000.0 }, "V"))
-        KV("电池电流（绝对值）", fmt(s?.let { Analyzer.currentMa(it) }, "mA", 0))
-        KV("电池侧功率（估算）", fmt(ui.batteryPowerW, "W"))
-        KV("输入侧功率（需 Root/Shizuku）", fmt(ui.inputPowerW, "W"))
-        KV("温度", fmt(s?.tempDeci?.let { it / 10.0 }, "°C", 1))
-        KV("健康", healthText(s?.health))
+    Section(tr("电池（公开 API）", "Battery (Public API)")) {
+        KV(tr("电量", "Level"), s?.levelPct?.let { "$it %" })
+        KV(tr("状态", "Status"), statusText(s?.status))
+        KV(tr("连接方式", "Plugged"), s?.let { pluggedText(it.plugged) })
+        KV(tr("电池端电压", "Battery Voltage"), fmt(s?.voltageMv?.let { it / 1000.0 }, "V"))
+        KV(tr("电池电流（绝对值）", "Battery Current"), fmt(s?.let { Analyzer.currentMa(it) }, "mA", 0))
+        KV(tr("电池侧功率（估算）", "Battery Power (Est.)"), fmt(ui.batteryPowerW, "W"))
+        KV(tr("输入侧功率（需 Root/Shizuku）", "Input Power (Root/Shizuku)"), fmt(ui.inputPowerW, "W"))
+        KV(tr("温度", "Temperature"), fmt(s?.tempDeci?.let { it / 10.0 }, "°C", 1))
+        KV(tr("健康", "Health"), healthText(s?.health))
     }
-    Section("功率曲线") {
+    Section(tr("功率曲线", "Power Chart")) {
         PowerChart(ui.series)
     }
     ui.metrics?.let { m ->
-        Section("统计（最近 ${m.count} 个样本，约 ${"%.0f".format(m.durationMs / 1000.0)} 秒）") {
-            KV("电量变化速率", fmt(m.socRatePerMin, "%/分钟"))
-            KV("平均功率（电池侧）", fmt(m.avgPowerMw?.div(1000.0), "W"))
-            KV("峰值功率（电池侧）", fmt(m.peakPowerMw?.div(1000.0), "W"))
-            KV("平均温度", fmt(m.avgTempDeci?.div(10.0), "°C", 1))
+        Section(tr("统计（最近 ${m.count} 个样本，约 ${"%.0f".format(m.durationMs / 1000.0)} 秒）", "Stats (${m.count} samples, ~${"%.0f".format(m.durationMs / 1000.0)}s)")) {
+            KV(tr("电量变化速率", "SOC Rate"), fmt(m.socRatePerMin, tr("%/分钟", "%/min")))
+            KV(tr("平均功率（电池侧）", "Avg Power (Bat)"), fmt(m.avgPowerMw?.div(1000.0), "W"))
+            KV(tr("峰值功率（电池侧）", "Peak Power (Bat)"), fmt(m.peakPowerMw?.div(1000.0), "W"))
+            KV(tr("平均温度", "Avg Temp"), fmt(m.avgTempDeci?.div(10.0), "°C", 1))
         }
     }
-    ui.notice?.let { n -> Section("提示") { Text(n) } }
+    ui.notice?.let { n -> Section(tr("提示", "Notice")) { Text(n) } }
     Button(
         onClick = {
             SamplingService.send(ctx, if (ui.recording) SamplingService.ACTION_STOP_REC else null)
         },
         modifier = Modifier.fillMaxWidth(),
-    ) { Text(if (ui.recording) "停止记录（已写入 ${ui.recordedRows} 行）" else "开始后台记录") }
+    ) {
+        Text(
+            if (ui.recording) tr("停止记录（已写入 ${ui.recordedRows} 行）", "Stop Recording (${ui.recordedRows} rows)")
+            else tr("开始后台记录", "Start Background Recording"),
+        )
+    }
 }
 
 private fun niceMax(v: Float): Float {
@@ -326,33 +394,33 @@ private fun ProtocolTab() {
     val ui by Sampler.state.collectAsState()
     val a = ui.analysis
     if (a == null) { Text("等待首次采样…"); return }
-    Section("结论：${a.status.label}") {
+    Section(tr("结论：${a.status.label}", "Conclusion: ${a.status.name}")) {
         Text(a.headline, style = MaterialTheme.typography.titleSmall)
-        KV("驱动报告协议", a.driver ?: "未报告")
-        KV("预测协议", a.predicted ?: "无法预测")
+        KV(tr("驱动报告协议", "Driver Protocol"), a.driver ?: tr("未报告", "None"))
+        KV(tr("预测协议", "Predicted Protocol"), a.predicted ?: tr("无法预测", "Unknown"))
         a.protocolSpec?.let { spec ->
-            Text("协议规格说明（参考上限，不代表当前实际功率）", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text(tr("协议规格说明（参考上限，不代表当前实际功率）", "Protocol Spec (Reference ceiling, not live power)"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             Text(spec, style = MaterialTheme.typography.bodySmall)
         }
     }
     if (a.description.isNotEmpty()) {
-        Section("描述") { Text(a.description) }
+        Section(tr("描述", "Summary")) { Text(a.description) }
     }
     if (a.candidates.isNotEmpty()) {
-        Section("候选协议（仅缩小范围，★ 为与本机品牌一致）") { a.candidates.forEach { Text("• $it") } }
+        Section(tr("候选协议（仅缩小范围，★ 为与本机品牌一致）", "Candidates (★ matches device brand)")) { a.candidates.forEach { Text("• $it") } }
     }
     if (a.candidateSpecs.isNotEmpty()) {
-        Section("候选协议档位说明（参考上限）") {
+        Section(tr("候选协议档位说明（参考上限）", "Candidate Tier Specs (Reference)")) {
             a.candidateSpecs.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
         }
     }
-    Fold("证据（L4 驱动 > L3 输入 > L2 功率 > L1 品牌）", "${a.evidence.size} 条") {
-        if (a.evidence.isEmpty()) Text("暂无证据") else a.evidence.sortedByDescending { it.level }.forEach {
+    Fold(tr("证据（L4 驱动 > L3 输入 > L2 功率 > L1 品牌）", "Evidence (L4 > L3 > L2 > L1)"), tr("${a.evidence.size} 条", "${a.evidence.size}")) {
+        if (a.evidence.isEmpty()) Text(tr("暂无证据", "No evidence")) else a.evidence.sortedByDescending { it.level }.forEach {
             Text("L${it.level}  ${it.text}")
         }
     }
-    Section("限制说明") { a.limitations.forEach { Text("• $it") } }
-    ui.rootError?.let { Section("特权通道状态") { Text(it) } }
+    Section(tr("限制说明", "Limitations")) { a.limitations.forEach { Text("• $it") } }
+    ui.rootError?.let { Section(tr("特权通道状态", "Privileged Channel")) { Text(it) } }
 }
 
 // ---------------------------------------------------------------- archive
@@ -503,49 +571,30 @@ private fun ArchiveTab() {
 // ---------------------------------------------------------------- device
 
 @Composable
-private fun FieldRow(label: String, status: String, ok: Boolean, note: String? = null) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                status,
-                color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.End,
-            )
-        }
-        if (note != null) {
-            Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun DeviceTab() {
+private fun DeviceTab(onOpenSettings: () -> Unit) {
     val ui by Sampler.state.collectAsState()
     val s = ui.latest
-    Section("设备") {
-        KV("型号", "${Build.MANUFACTURER} ${Build.MODEL}")
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(tr("设备", "Device"), style = MaterialTheme.typography.titleLarge)
+        IconButton(onClick = onOpenSettings) {
+            Icon(
+                painter = painterResource(R.drawable.ic_settings),
+                contentDescription = tr("软件设置", "App Settings"),
+            )
+        }
+    }
+    Section(tr("设备信息", "Device Info")) {
+        KV(tr("型号", "Model"), "${Build.MANUFACTURER} ${Build.MODEL}")
         KV("Android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         KV("SoC", if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else null)
     }
-    Section("无特权可读字段") {
-        val baseOk = s?.levelPct != null || s?.voltageMv != null
-        val curOk = s?.currentUa != null
-        val avgOk = s?.currentAvgUa != null
-        val ccVal = s?.chargeCounterUah?.let { "$it µAh" }
-        FieldRow("电量 / 电压 / 温度 / 状态", if (baseOk) "可用" else "不可用", baseOk)
-        FieldRow("瞬时电流", if (curOk) "可用" else "不可用", curOk)
-        FieldRow("平均电流", if (avgOk) "可用" else "不可用", avgOk)
-        FieldRow("累计电荷", ccVal ?: "不可用", ccVal != null)
-        FieldRow("输入侧电压 / 电流", "需 Root / Shizuku", false, "节点路径与可读性因机型和 SELinux 策略而异")
-    }
-    Section("特权通道读取的节点（只读）") {
+    Section(tr("特权通道读取的节点（只读）", "Privileged Nodes (Read-only)")) {
         val nodes = s?.rootNodes.orEmpty()
-        if (nodes.isEmpty()) Text(ui.rootError ?: "未启用（在“数据”页开启 Root 或 Shizuku）")
+        if (nodes.isEmpty()) Text(ui.rootError ?: tr("未启用（在“数据”页开启 Root 或 Shizuku）", "Disabled (enable Root or Shizuku in Data tab)"))
         nodes.forEach { n ->
             Text(n.name, style = MaterialTheme.typography.titleSmall)
             Text(n.props.entries.joinToString("  ") { "${it.key}=${it.value}" }, style = MaterialTheme.typography.bodySmall)
@@ -665,37 +714,37 @@ private fun DataTab() {
         }
     }
 
-    Fold("采样间隔", "${interval / 1000} 秒") {
+    Fold(tr("采样间隔", "Sampling Interval"), tr("${interval / 1000} 秒", "${interval / 1000}s")) {
         Chips(INTERVAL_OPTS, interval) { interval = it; Prefs.setIntervalMs(ctx, it) }
     }
-    Fold("自动记录", if (auto) "已开启" else "已关闭") {
+    Fold(tr("自动记录", "Auto Record"), if (auto) tr("已开启", "On") else tr("已关闭", "Off")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("连接充电器时自动开始，拔出后停止", Modifier.weight(1f))
+            Text(tr("连接充电器时自动开始，拔出后停止", "Auto-start on plug-in, stop on unplug"), Modifier.weight(1f))
             Switch(checked = auto, onCheckedChange = {
                 auto = it
                 Prefs.setAutoRecord(ctx, it)
                 SamplingService.send(ctx, if (it) SamplingService.ACTION_ARM else SamplingService.ACTION_DISARM)
             })
         }
-        Text("开启后会常驻一条低优先级通知（空闲时不采样）。系统重启后需打开一次应用以恢复。", style = MaterialTheme.typography.bodySmall)
+        Text(tr("开启后会常驻一条低优先级通知（空闲时不采样）。系统重启后需打开一次应用以恢复。", "Shows a low-priority notification while idle (no sampling). Open the app once after reboot to re-arm."), style = MaterialTheme.typography.bodySmall)
     }
     Fold(
-        "安全阈值（任一触发即停止记录）",
-        "${maxTemp}°C · " + (if (maxMin > 0) "${maxMin}分" else "不限时") + " · " + (if (stopSoc > 0) "${stopSoc}%" else "不限电量") + " · ${maxMb}MB",
+        tr("安全阈值（任一触发即停止记录）", "Safety Limits (Stop Recording)"),
+        "${maxTemp}°C · " + (if (maxMin > 0) "${maxMin}m" else tr("不限时", "No limit")) + " · " + (if (stopSoc > 0) "${stopSoc}%" else tr("不限电量", "Any SOC")) + " · ${maxMb}MB",
     ) {
-        Text("电池温度上限", style = MaterialTheme.typography.labelLarge)
+        Text(tr("电池温度上限", "Max Battery Temp"), style = MaterialTheme.typography.labelLarge)
         Chips(TEMP_OPTS, maxTemp) { maxTemp = it; Prefs.setLong(ctx, Prefs.TEMP, it) }
-        Text("单次最长时长", style = MaterialTheme.typography.labelLarge)
+        Text(tr("单次最长时长", "Max Session Duration"), style = MaterialTheme.typography.labelLarge)
         Chips(MIN_OPTS, maxMin) { maxMin = it; Prefs.setLong(ctx, Prefs.MINUTES, it) }
-        Text("电量达到后停止", style = MaterialTheme.typography.labelLarge)
+        Text(tr("电量达到后停止", "Stop at SOC"), style = MaterialTheme.typography.labelLarge)
         Chips(SOC_OPTS, stopSoc) { stopSoc = it; Prefs.setLong(ctx, Prefs.SOC, it) }
-        Text("记录文件大小上限（压缩后）", style = MaterialTheme.typography.labelLarge)
+        Text(tr("记录文件大小上限（压缩后）", "Max Log File Size (GZIP)"), style = MaterialTheme.typography.labelLarge)
         Chips(MB_OPTS, maxMb) { maxMb = it; Prefs.setLong(ctx, Prefs.FILE_MB, it) }
-        Text("阈值只会停止本应用的记录，不会控制或限制充电。", style = MaterialTheme.typography.bodySmall)
+        Text(tr("阈值只会停止本应用的记录，不会控制或限制充电。", "Limits only stop recording; this app never controls charging."), style = MaterialTheme.typography.bodySmall)
     }
     Fold(
-        "特权增强（默认关闭，只读）",
-        when (mode) { 1L -> "Root"; 2L -> "Shizuku"; else -> "关闭" },
+        tr("特权增强（默认关闭，只读）", "Privileged Mode (Read-only)"),
+        when (mode) { 1L -> "Root"; 2L -> "Shizuku"; else -> tr("关闭", "Off") },
     ) {
         Chips(PRIV_OPTS, mode) {
             mode = it
@@ -734,19 +783,19 @@ private fun DataTab() {
         )
         rootError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
-    Fold("记录与日志", "$recordedRows 行 · ${fmtBytes(diskBytes)}") {
-        Text("已记录 $recordedRows 行，本机总占用约 ${fmtBytes(diskBytes)}（CSV 采用 GZIP 压缩存储，导出时自动解压）。应用无联网权限，导出不含设备标识。")
-        Button(onClick = { exportCsv.launch("chargescope.csv") }, modifier = Modifier.fillMaxWidth()) { Text("导出 CSV 记录") }
-        Button(onClick = { exportLog.launch("chargescope-log.txt") }, modifier = Modifier.fillMaxWidth()) { Text("导出诊断日志") }
+    Fold(tr("记录与日志", "Records & Logs"), tr("$recordedRows 行 · ${fmtBytes(diskBytes)}", "$recordedRows rows · ${fmtBytes(diskBytes)}")) {
+        Text(tr("已记录 $recordedRows 行，本机总占用约 ${fmtBytes(diskBytes)}（CSV 采用 GZIP 压缩存储，导出时自动解压）。应用无联网权限，导出不含设备标识。", "$recordedRows rows recorded, ~${fmtBytes(diskBytes)} on disk (GZIP compressed, auto-decompressed on export). Offline only."))
+        Button(onClick = { exportCsv.launch("chargescope.csv") }, modifier = Modifier.fillMaxWidth()) { Text(tr("导出 CSV 记录", "Export CSV")) }
+        Button(onClick = { exportLog.launch("chargescope-log.txt") }, modifier = Modifier.fillMaxWidth()) { Text(tr("导出诊断日志", "Export Diagnostic Log")) }
         OutlinedButton(
             onClick = {
                 if (confirmClear) {
                     Recorder.clear(ctx); AppLog.clear()
                     diskBytes = Archive.sizeBytes()
-                    msg = "已清除记录和日志"; confirmClear = false
+                    msg = tr("已清除记录和日志", "Records and logs cleared"); confirmClear = false
                 } else confirmClear = true
             },
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (confirmClear) "再次点击确认清除记录和日志" else "清除记录和日志") }
+        ) { Text(if (confirmClear) tr("再次点击确认清除记录和日志", "Tap again to confirm clear") else tr("清除记录和日志", "Clear Records & Logs")) }
     }
 }
