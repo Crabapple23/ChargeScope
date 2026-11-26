@@ -13,8 +13,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -58,11 +56,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -417,6 +415,13 @@ private fun DeviceTab() {
 
 // ---------------------------------------------------------------- data
 
+private val INTERVAL_OPTS = listOf("1 秒" to 1000L, "2 秒" to 2000L, "5 秒" to 5000L)
+private val TEMP_OPTS = listOf("40 °C" to 40L, "42 °C" to 42L, "45 °C" to 45L, "50 °C" to 50L)
+private val MIN_OPTS = listOf("30 分钟" to 30L, "1 小时" to 60L, "2 小时" to 120L, "不限" to 0L)
+private val SOC_OPTS = listOf("80%" to 80L, "90%" to 90L, "100%" to 100L, "不限" to 0L)
+private val MB_OPTS = listOf("4 MB" to 4L, "8 MB" to 8L, "16 MB" to 16L)
+private val PRIV_OPTS = listOf("关闭" to 0L, "Root" to 1L, "Shizuku" to 2L)
+
 @Composable
 private fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: (Long) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -427,27 +432,30 @@ private fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: (
 }
 
 @Composable
-private fun Fold(title: String, summary: String, expanded: Boolean, onToggle: () -> Unit, content: @Composable () -> Unit) {
-    val arrowAngle by animateFloatAsState(
+private fun Fold(title: String, summary: String, content: @Composable () -> Unit) {
+    // Local state per card so toggling one block never recomposes DataTab or sibling cards.
+    var expanded by remember { mutableStateOf(false) }
+    val arrowAngle = animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(200),
+        animationSpec = tween(180),
         label = "foldArrow",
     )
     Card(Modifier.fillMaxWidth()) {
         Column {
             Row(
-                Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(12.dp),
+                Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 if (!expanded) Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("▸", Modifier.rotate(arrowAngle))
+                // Read animated value inside graphicsLayer so rotation runs on GPU without recomposing.
+                Text("▸", Modifier.graphicsLayer { rotationZ = arrowAngle.value })
             }
             AnimatedVisibility(
                 visible = expanded,
-                enter = expandVertically(tween(220)) + fadeIn(tween(180)),
-                exit = shrinkVertically(tween(200)) + fadeOut(tween(150)),
+                enter = expandVertically(tween(200)),
+                exit = shrinkVertically(tween(180)),
             ) {
                 Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     content()
@@ -467,6 +475,7 @@ private fun DataTab() {
 
     var mode by remember(rootError) { mutableStateOf(Prefs.privMode(ctx).toLong()) }
     var shz by remember { mutableStateOf(ShizukuBridge.state()) }
+    var rootProvider by remember { mutableStateOf<RootScanner.Provider?>(null) }
     var interval by remember { mutableStateOf(Prefs.intervalMs(ctx)) }
     var auto by remember { mutableStateOf(Prefs.autoRecord(ctx)) }
     var maxTemp by remember { mutableStateOf(Prefs.long(ctx, Prefs.TEMP, 45L)) }
@@ -476,11 +485,11 @@ private fun DataTab() {
     var msg by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     var diskBytes by remember { mutableLongStateOf(0L) }
-    // Multiple blocks can be expanded simultaneously; all collapsed by default.
-    var opened by remember { mutableStateOf(emptySet<String>()) }
-    val toggle = { t: String -> opened = if (t in opened) opened - t else opened + t }
 
-    LaunchedEffect(opened, recordedRows) {
+    LaunchedEffect(Unit) {
+        rootProvider = withContext(Dispatchers.IO) { RootScanner.detectProvider(ctx) }
+    }
+    LaunchedEffect(recordedRows) {
         diskBytes = withContext(Dispatchers.IO) {
             Recorder.diskBytes(ctx) + Archive.sizeBytes() + AppLog.sizeBytes()
         }
@@ -511,10 +520,10 @@ private fun DataTab() {
         }
     }
 
-    Fold("采样间隔", "${interval / 1000} 秒", "采样间隔" in opened, { toggle("采样间隔") }) {
-        Chips(listOf("1 秒" to 1000L, "2 秒" to 2000L, "5 秒" to 5000L), interval) { interval = it; Prefs.setIntervalMs(ctx, it) }
+    Fold("采样间隔", "${interval / 1000} 秒") {
+        Chips(INTERVAL_OPTS, interval) { interval = it; Prefs.setIntervalMs(ctx, it) }
     }
-    Fold("自动记录", if (auto) "已开启" else "已关闭", "自动记录" in opened, { toggle("自动记录") }) {
+    Fold("自动记录", if (auto) "已开启" else "已关闭") {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("连接充电器时自动开始，拔出后停止", Modifier.weight(1f))
             Switch(checked = auto, onCheckedChange = {
@@ -528,28 +537,26 @@ private fun DataTab() {
     Fold(
         "安全阈值（任一触发即停止记录）",
         "${maxTemp}°C · " + (if (maxMin > 0) "${maxMin}分" else "不限时") + " · " + (if (stopSoc > 0) "${stopSoc}%" else "不限电量") + " · ${maxMb}MB",
-        "安全阈值" in opened, { toggle("安全阈值") },
     ) {
         Text("电池温度上限", style = MaterialTheme.typography.labelLarge)
-        Chips(listOf("40 °C" to 40L, "42 °C" to 42L, "45 °C" to 45L, "50 °C" to 50L), maxTemp) { maxTemp = it; Prefs.setLong(ctx, Prefs.TEMP, it) }
+        Chips(TEMP_OPTS, maxTemp) { maxTemp = it; Prefs.setLong(ctx, Prefs.TEMP, it) }
         Text("单次最长时长", style = MaterialTheme.typography.labelLarge)
-        Chips(listOf("30 分钟" to 30L, "1 小时" to 60L, "2 小时" to 120L, "不限" to 0L), maxMin) { maxMin = it; Prefs.setLong(ctx, Prefs.MINUTES, it) }
+        Chips(MIN_OPTS, maxMin) { maxMin = it; Prefs.setLong(ctx, Prefs.MINUTES, it) }
         Text("电量达到后停止", style = MaterialTheme.typography.labelLarge)
-        Chips(listOf("80%" to 80L, "90%" to 90L, "100%" to 100L, "不限" to 0L), stopSoc) { stopSoc = it; Prefs.setLong(ctx, Prefs.SOC, it) }
+        Chips(SOC_OPTS, stopSoc) { stopSoc = it; Prefs.setLong(ctx, Prefs.SOC, it) }
         Text("记录文件大小上限（压缩后）", style = MaterialTheme.typography.labelLarge)
-        Chips(listOf("4 MB" to 4L, "8 MB" to 8L, "16 MB" to 16L), maxMb) { maxMb = it; Prefs.setLong(ctx, Prefs.FILE_MB, it) }
+        Chips(MB_OPTS, maxMb) { maxMb = it; Prefs.setLong(ctx, Prefs.FILE_MB, it) }
         Text("阈值只会停止本应用的记录，不会控制或限制充电。", style = MaterialTheme.typography.bodySmall)
     }
     Fold(
         "特权增强（默认关闭，只读）",
         when (mode) { 1L -> "Root"; 2L -> "Shizuku"; else -> "关闭" },
-        "特权增强" in opened, { toggle("特权增强") },
     ) {
-        Chips(listOf("关闭" to 0L, "Root" to 1L, "Shizuku" to 2L), mode) {
+        Chips(PRIV_OPTS, mode) {
             mode = it; Prefs.setPrivMode(ctx, it.toInt()); shz = ShizukuBridge.state()
         }
         if (mode == 1L) {
-            Text("Root 管理器：" + (RootScanner.detectProvider(ctx)?.label ?: "未检测到 Magisk / KernelSU / APatch"))
+            Text("Root 管理器：" + (rootProvider?.label ?: "未检测到 Magisk / KernelSU / APatch"))
             Text("兼容 Magisk、KernelSU、APatch：复用单个持久 su 会话，减少反复授权与进程开销。", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(
                 onClick = {
@@ -587,7 +594,7 @@ private fun DataTab() {
         )
         rootError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
-    Fold("记录与日志", "$recordedRows 行 · ${fmtBytes(diskBytes)}", "记录与日志" in opened, { toggle("记录与日志") }) {
+    Fold("记录与日志", "$recordedRows 行 · ${fmtBytes(diskBytes)}") {
         Text("已记录 $recordedRows 行，本机总占用约 ${fmtBytes(diskBytes)}（CSV 采用 GZIP 压缩存储，导出时自动解压）。应用无联网权限，导出不含设备标识。")
         Button(onClick = { exportCsv.launch("chargescope.csv") }, modifier = Modifier.fillMaxWidth()) { Text("导出 CSV 记录") }
         Button(onClick = { exportLog.launch("chargescope-log.txt") }, modifier = Modifier.fillMaxWidth()) { Text("导出诊断日志") }
