@@ -9,6 +9,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -51,6 +58,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -420,6 +428,11 @@ private fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: (
 
 @Composable
 private fun Fold(title: String, summary: String, expanded: Boolean, onToggle: () -> Unit, content: @Composable () -> Unit) {
+    val arrowAngle by animateFloatAsState(
+        targetValue = if (expanded) 90f else 0f,
+        animationSpec = tween(200),
+        label = "foldArrow",
+    )
     Card(Modifier.fillMaxWidth()) {
         Column {
             Row(
@@ -429,9 +442,13 @@ private fun Fold(title: String, summary: String, expanded: Boolean, onToggle: ()
             ) {
                 Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 if (!expanded) Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(if (expanded) "▾" else "▸")
+                Text("▸", Modifier.rotate(arrowAngle))
             }
-            if (expanded) {
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                exit = shrinkVertically(tween(200)) + fadeOut(tween(150)),
+            ) {
                 Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     content()
                 }
@@ -459,11 +476,11 @@ private fun DataTab() {
     var msg by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     var diskBytes by remember { mutableLongStateOf(0L) }
-    // Accordion: only one block open at a time; all collapsed by default.
-    var open by remember { mutableStateOf<String?>(null) }
-    val toggle = { t: String -> open = if (open == t) null else t }
+    // Multiple blocks can be expanded simultaneously; all collapsed by default.
+    var opened by remember { mutableStateOf(emptySet<String>()) }
+    val toggle = { t: String -> opened = if (t in opened) opened - t else opened + t }
 
-    LaunchedEffect(open, recordedRows) {
+    LaunchedEffect(opened, recordedRows) {
         diskBytes = withContext(Dispatchers.IO) {
             Recorder.diskBytes(ctx) + Archive.sizeBytes() + AppLog.sizeBytes()
         }
@@ -494,10 +511,10 @@ private fun DataTab() {
         }
     }
 
-    Fold("采样间隔", "${interval / 1000} 秒", open == "采样间隔", { toggle("采样间隔") }) {
+    Fold("采样间隔", "${interval / 1000} 秒", "采样间隔" in opened, { toggle("采样间隔") }) {
         Chips(listOf("1 秒" to 1000L, "2 秒" to 2000L, "5 秒" to 5000L), interval) { interval = it; Prefs.setIntervalMs(ctx, it) }
     }
-    Fold("自动记录", if (auto) "已开启" else "已关闭", open == "自动记录", { toggle("自动记录") }) {
+    Fold("自动记录", if (auto) "已开启" else "已关闭", "自动记录" in opened, { toggle("自动记录") }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("连接充电器时自动开始，拔出后停止", Modifier.weight(1f))
             Switch(checked = auto, onCheckedChange = {
@@ -511,7 +528,7 @@ private fun DataTab() {
     Fold(
         "安全阈值（任一触发即停止记录）",
         "${maxTemp}°C · " + (if (maxMin > 0) "${maxMin}分" else "不限时") + " · " + (if (stopSoc > 0) "${stopSoc}%" else "不限电量") + " · ${maxMb}MB",
-        open == "安全阈值", { toggle("安全阈值") },
+        "安全阈值" in opened, { toggle("安全阈值") },
     ) {
         Text("电池温度上限", style = MaterialTheme.typography.labelLarge)
         Chips(listOf("40 °C" to 40L, "42 °C" to 42L, "45 °C" to 45L, "50 °C" to 50L), maxTemp) { maxTemp = it; Prefs.setLong(ctx, Prefs.TEMP, it) }
@@ -526,7 +543,7 @@ private fun DataTab() {
     Fold(
         "特权增强（默认关闭，只读）",
         when (mode) { 1L -> "Root"; 2L -> "Shizuku"; else -> "关闭" },
-        open == "特权增强", { toggle("特权增强") },
+        "特权增强" in opened, { toggle("特权增强") },
     ) {
         Chips(listOf("关闭" to 0L, "Root" to 1L, "Shizuku" to 2L), mode) {
             mode = it; Prefs.setPrivMode(ctx, it.toInt()); shz = ShizukuBridge.state()
@@ -570,7 +587,7 @@ private fun DataTab() {
         )
         rootError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
-    Fold("记录与日志", "$recordedRows 行 · ${fmtBytes(diskBytes)}", open == "记录与日志", { toggle("记录与日志") }) {
+    Fold("记录与日志", "$recordedRows 行 · ${fmtBytes(diskBytes)}", "记录与日志" in opened, { toggle("记录与日志") }) {
         Text("已记录 $recordedRows 行，本机总占用约 ${fmtBytes(diskBytes)}（CSV 采用 GZIP 压缩存储，导出时自动解压）。应用无联网权限，导出不含设备标识。")
         Button(onClick = { exportCsv.launch("chargescope.csv") }, modifier = Modifier.fillMaxWidth()) { Text("导出 CSV 记录") }
         Button(onClick = { exportLog.launch("chargescope-log.txt") }, modifier = Modifier.fillMaxWidth()) { Text("导出诊断日志") }
