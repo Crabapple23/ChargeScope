@@ -169,7 +169,7 @@ class SamplingService : Service() {
             channelReady = true
         }
         ServiceCompat.startForeground(
-            this, ID, notification("ChargeScope 运行中"),
+            this, ID, notification("充了个电 运行中"),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0,
         )
     }
@@ -180,7 +180,7 @@ class SamplingService : Service() {
     private fun notification(text: String): Notification =
         Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
-            .setContentTitle("ChargeScope")
+            .setContentTitle("充了个电")
             .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -200,9 +200,9 @@ class SamplingService : Service() {
     }
 
     companion object {
-        const val ACTION_ARM = "com.chargescope.app.ARM"
-        const val ACTION_DISARM = "com.chargescope.app.DISARM"
-        const val ACTION_STOP_REC = "com.chargescope.app.STOP_REC"
+        const val ACTION_ARM = "com.chargescope.hanhan.app.ARM"
+        const val ACTION_DISARM = "com.chargescope.hanhan.app.DISARM"
+        const val ACTION_STOP_REC = "com.chargescope.hanhan.app.STOP_REC"
         private const val CHANNEL = "sampling"
         private const val ID = 1
 

@@ -296,7 +296,12 @@ fun SettingsScreen(prefs: AppPrefs, onBack: () -> Unit) {
             }
 
             SettingsCard(tr("关于", "About")) {
-                Text("ChargeScope v0.4.0", style = MaterialTheme.typography.bodyMedium)
+                Text("充了个电 (ChargeScope) v0.4.0", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "com.chargescope.hanhan.app",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Text(
                     AppSettings.REPO_URL,
                     style = MaterialTheme.typography.bodySmall,
