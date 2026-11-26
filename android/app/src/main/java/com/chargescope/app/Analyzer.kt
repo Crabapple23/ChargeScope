@@ -185,6 +185,22 @@ object Analyzer {
         return if (eff in 45.0..102.0) eff.coerceAtMost(99.9) else null
     }
 
+    /**
+     * Estimated time remaining until full charge, as (remainingMs to fromSystemApi).
+     * Prefers Android 9+ BatteryManager.computeChargeTimeRemaining(), falling back to SOC rate.
+     * Returns null when not charging or no reliable estimate is available.
+     */
+    fun estimateChargeTimeRemainingMs(s: Snapshot?, m: Metrics?): Pair<Long, Boolean>? {
+        if (s == null || !s.isCharging) return null
+        val sysMs = s.chargeTimeRemainingMs
+        if (sysMs != null && sysMs > 0L) return sysMs to true
+        val level = s.levelPct ?: return null
+        val rate = m?.socRatePerMin ?: return null
+        if (level !in 0..99 || rate <= 0.05) return null
+        val ms = ((100 - level) / rate * 60_000.0).toLong()
+        return if (ms in 1L..(48L * 3600_000L)) ms to false else null
+    }
+
     // ---- Spec table (from the protocol reference document) -------------------------------
 
     private data class Profile(val brand: String, val name: String, val v: Double, val a: Double)

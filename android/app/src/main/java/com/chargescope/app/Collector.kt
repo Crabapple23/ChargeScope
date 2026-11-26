@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
+import android.os.Build
 import android.os.SystemClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -40,11 +41,20 @@ object Collector {
             return if (v == Long.MIN_VALUE || (zeroIsMissing && v == 0L)) null else v
         }
 
+        val status = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1).takeIf { it > 0 }
+        val chargeTimeMs = if (Build.VERSION.SDK_INT >= 28 && status == BatteryManager.BATTERY_STATUS_CHARGING) {
+            try {
+                bm.computeChargeTimeRemaining().takeIf { it > 0L }
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+
         return Snapshot(
             elapsedMs = elapsed,
             wallMs = wall,
             levelPct = pct,
-            status = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1).takeIf { it > 0 },
+            status = status,
             plugged = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0),
             health = i.getIntExtra(BatteryManager.EXTRA_HEALTH, -1).takeIf { it > 0 },
             voltageMv = mv,
@@ -52,6 +62,7 @@ object Collector {
             currentUa = prop(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW, false),
             currentAvgUa = prop(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE, false),
             chargeCounterUah = prop(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER, true),
+            chargeTimeRemainingMs = chargeTimeMs,
         )
     }
 }

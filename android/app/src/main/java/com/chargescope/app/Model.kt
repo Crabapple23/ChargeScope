@@ -17,6 +17,7 @@ data class Snapshot(
     val currentAvgUa: Long?,
     val chargeCounterUah: Long?,
     val rootNodes: List<RootNode> = emptyList(),
+    val chargeTimeRemainingMs: Long? = null,
 ) {
     val isCharging: Boolean get() = status == 2
     val isPlugged: Boolean get() = plugged != 0

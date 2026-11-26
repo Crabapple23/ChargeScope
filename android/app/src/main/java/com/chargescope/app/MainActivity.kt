@@ -362,6 +362,18 @@ private fun fmtBytes(b: Long): String = when {
     else -> "%.2f MB".format(b / (1024.0 * 1024.0))
 }
 
+private fun fmtDuration(ms: Long, isEn: Boolean): String {
+    val totalMin = ((ms + 30_000L) / 60_000L).coerceAtLeast(1L)
+    if (totalMin < 60L) return if (isEn) "${totalMin}m" else "${totalMin} 分钟"
+    val h = totalMin / 60L
+    val m = totalMin % 60L
+    return when {
+        m == 0L -> if (isEn) "${h}h" else "${h} 小时"
+        isEn -> "${h}h ${m}m"
+        else -> "${h} 小时 ${m} 分钟"
+    }
+}
+
 private fun statusText(s: Int?, isEn: Boolean = false) = if (isEn) when (s) {
     2 -> "Charging"; 3 -> "Discharging"; 4 -> "Not Charging"; 5 -> "Full"; else -> null
 } else when (s) {
@@ -409,6 +421,11 @@ private fun RealtimeTab() {
             if (cycles != null) add(tr("${cycles}次循环", "$cycles cycles"))
         }.joinToString(" · ").ifEmpty { null }
         KV(tr("健康", "Health"), healthDisplay)
+        val etaText = Analyzer.estimateChargeTimeRemainingMs(s, ui.metrics)?.let { (ms, fromSys) ->
+            val dur = fmtDuration(ms, isEn)
+            if (fromSys) dur else dur + tr("（速率估算）", " (est.)")
+        }
+        KV(tr("预计充满时间", "Est. Time to Full"), etaText)
     }
     Section(tr("功率曲线", "Power Chart")) {
         PowerChart(ui.series)

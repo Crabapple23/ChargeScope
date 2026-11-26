@@ -12,8 +12,11 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.SystemClock
+import android.widget.Toast
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +43,8 @@ class SamplingService : Service() {
     @Volatile private var suppressed = false
     private var receiverOn = false
     private var channelReady = false
+    private var alertChannelReady = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -118,6 +123,7 @@ class SamplingService : Service() {
                 val why = violation(app, s, started)
                 if (why != null) {
                     stopRecording(why)
+                    notifySafetyThreshold(why)
                     suppressed = true
                     afterStop()
                     return@launch
@@ -178,6 +184,32 @@ class SamplingService : Service() {
             this, ID, notification("充了个电 运行中"),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0,
         )
+    }
+
+    private fun notifySafetyThreshold(reason: String) {
+        mainHandler.post {
+            try {
+                Toast.makeText(applicationContext, reason, Toast.LENGTH_LONG).show()
+            } catch (_: Exception) {
+            }
+        }
+        if (!hasNotificationPermission(this)) return
+        val nm = getSystemService(NotificationManager::class.java)
+        if (!alertChannelReady) {
+            nm.createNotificationChannel(
+                NotificationChannel(ALERT_CHANNEL, "安全阈值提醒", NotificationManager.IMPORTANCE_DEFAULT),
+            )
+            alertChannelReady = true
+        }
+        val n = Notification.Builder(this, ALERT_CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("安全阈值已触发")
+            .setContentText(reason)
+            .setStyle(Notification.BigTextStyle().bigText(reason))
+            .setContentIntent(contentIntent())
+            .setAutoCancel(true)
+            .build()
+        nm.notify(ALERT_ID, n)
     }
 
     private fun postNote(text: String, showStopAction: Boolean = false) =
@@ -241,7 +273,9 @@ class SamplingService : Service() {
         const val ACTION_DISARM = "com.chargescope.hanhan.app.DISARM"
         const val ACTION_STOP_REC = "com.chargescope.hanhan.app.STOP_REC"
         private const val CHANNEL = "sampling"
+        private const val ALERT_CHANNEL = "safety_alert"
         private const val ID = 1
+        private const val ALERT_ID = 2
 
         fun send(ctx: Context, action: String?) {
             val i = Intent(ctx, SamplingService::class.java)
