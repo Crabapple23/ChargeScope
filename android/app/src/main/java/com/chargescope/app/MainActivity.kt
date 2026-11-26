@@ -14,7 +14,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -172,10 +176,8 @@ private fun App() {
 
     CompositionLocalProvider(LocalDensity provides scaledDensity, LocalIsEn provides prefs.isEn) {
         MaterialTheme(colorScheme = colors) {
-            if (showSettings) {
-                BackHandler { showSettings = false }
-                SettingsScreen(prefs = prefs, onBack = { showSettings = false })
-            } else {
+            BackHandler(enabled = showSettings) { showSettings = false }
+            Box(Modifier.fillMaxSize()) {
                 Scaffold(
                     bottomBar = {
                         NavigationBar {
@@ -206,6 +208,13 @@ private fun App() {
                             else -> ScrollBody { DeviceTab(onOpenSettings = { showSettings = true }) }
                         }
                     }
+                }
+                AnimatedVisibility(
+                    visible = showSettings,
+                    enter = slideInHorizontally(tween(240)) { it } + fadeIn(tween(180)),
+                    exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(160)),
+                ) {
+                    SettingsScreen(prefs = prefs, onBack = { showSettings = false })
                 }
             }
         }
