@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,6 +42,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -65,6 +67,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -97,6 +100,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -149,6 +153,8 @@ private fun App() {
     val prefs by AppSettings.prefs.collectAsState()
     var tab by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
+    var backProgress by remember { mutableFloatStateOf(0f) }
+    var backEdge by remember { mutableIntStateOf(0) }
 
     val dark = when (prefs.themeMode) {
         1 -> false
@@ -177,7 +183,20 @@ private fun App() {
 
     CompositionLocalProvider(LocalDensity provides scaledDensity, LocalIsEn provides prefs.isEn) {
         MaterialTheme(colorScheme = colors) {
-            BackHandler(enabled = showSettings) { showSettings = false }
+            BackHandler(enabled = showSettings && !prefs.predictiveBack) { showSettings = false }
+            PredictiveBackHandler(enabled = showSettings && prefs.predictiveBack) { progress ->
+                try {
+                    progress.collect { ev ->
+                        backProgress = ev.progress
+                        backEdge = ev.swipeEdge
+                    }
+                    showSettings = false
+                } catch (_: CancellationException) {
+                    // Swipe cancelled; restore full scale.
+                } finally {
+                    backProgress = 0f
+                }
+            }
             Box(Modifier.fillMaxSize()) {
                 Scaffold(
                     bottomBar = {
@@ -215,7 +234,25 @@ private fun App() {
                     enter = slideInHorizontally(tween(240)) { it } + fadeIn(tween(180)),
                     exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(160)),
                 ) {
-                    SettingsScreen(prefs = prefs, onBack = { showSettings = false })
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                val p = backProgress
+                                if (p > 0f) {
+                                    val s = 1f - p * 0.12f
+                                    scaleX = s
+                                    scaleY = s
+                                    // Edge 0 = left swipe (shift right), Edge 1 = right swipe (shift left).
+                                    val dir = if (backEdge == 1) -1f else 1f
+                                    translationX = size.width * p * 0.14f * dir
+                                    shape = RoundedCornerShape((p * 28f).dp)
+                                    clip = true
+                                }
+                            },
+                    ) {
+                        SettingsScreen(prefs = prefs, onBack = { showSettings = false })
+                    }
                 }
             }
         }

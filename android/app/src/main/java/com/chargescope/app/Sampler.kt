@@ -60,6 +60,9 @@ object Prefs {
     /** 0 = GitHub Releases (default), 1 = GitHub Actions */
     fun updateSource(c: Context): Int = sp(c).getInt("update_src", 0)
     fun setUpdateSource(c: Context, v: Int) = sp(c).edit().putInt("update_src", v).apply()
+
+    fun predictiveBack(c: Context): Boolean = sp(c).getBoolean("pred_back", true)
+    fun setPredictiveBack(c: Context, v: Boolean) = sp(c).edit().putBoolean("pred_back", v).apply()
 }
 
 /**

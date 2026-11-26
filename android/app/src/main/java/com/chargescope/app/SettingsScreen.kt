@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
@@ -35,6 +36,7 @@ data class AppPrefs(
     val fontTier: Int = 1,  // 0 = small, 1 = normal, 2 = large, 3 = xlarge
     val lang: String = "zh",
     val updateSource: Int = 0, // 0 = GitHub Releases, 1 = GitHub Actions
+    val predictiveBack: Boolean = true,
 ) {
     val isEn: Boolean get() = lang == "en"
     val fontMultiplier: Float
@@ -60,6 +62,7 @@ object AppSettings {
             fontTier = Prefs.fontTier(ctx),
             lang = Prefs.lang(ctx),
             updateSource = Prefs.updateSource(ctx),
+            predictiveBack = Prefs.predictiveBack(ctx),
         )
     }
 
@@ -81,6 +84,11 @@ object AppSettings {
     fun setUpdateSource(ctx: Context, v: Int) {
         Prefs.setUpdateSource(ctx, v)
         _prefs.value = _prefs.value.copy(updateSource = v)
+    }
+
+    fun setPredictiveBack(ctx: Context, v: Boolean) {
+        Prefs.setPredictiveBack(ctx, v)
+        _prefs.value = _prefs.value.copy(predictiveBack = v)
     }
 }
 
@@ -158,6 +166,28 @@ fun SettingsScreen(prefs: AppPrefs, onBack: () -> Unit) {
                 }
                 Text(
                     tr("即时生效，按挡位缩放全应用文字。", "Takes effect immediately across all screens."),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            SettingsCard(tr("预测性返回动画", "Predictive Back Animation")) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        tr("侧滑返回时实时跟手缩放预览", "Follow-finger scale preview on back gesture"),
+                        Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = prefs.predictiveBack,
+                        onCheckedChange = { AppSettings.setPredictiveBack(ctx, it) },
+                    )
+                }
+                Text(
+                    tr("需 Android 14+ 全面屏手势导航；关闭后恢复普通返回动画。", "Requires Android 14+ gesture navigation; disable for standard back transition."),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
