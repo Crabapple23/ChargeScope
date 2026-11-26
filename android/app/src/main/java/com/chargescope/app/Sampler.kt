@@ -63,6 +63,9 @@ object Prefs {
 
     fun predictiveBack(c: Context): Boolean = sp(c).getBoolean("pred_back", true)
     fun setPredictiveBack(c: Context, v: Boolean) = sp(c).edit().putBoolean("pred_back", v).apply()
+
+    fun dynamicColor(c: Context): Boolean = sp(c).getBoolean("dyn_color", true)
+    fun setDynamicColor(c: Context, v: Boolean) = sp(c).edit().putBoolean("dyn_color", v).apply()
 }
 
 /**

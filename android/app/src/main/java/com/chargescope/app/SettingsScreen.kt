@@ -3,6 +3,7 @@ package com.chargescope.app
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +38,7 @@ data class AppPrefs(
     val lang: String = "zh",
     val updateSource: Int = 0, // 0 = GitHub Releases, 1 = GitHub Actions
     val predictiveBack: Boolean = true,
+    val dynamicColor: Boolean = true,
 ) {
     val isEn: Boolean get() = lang == "en"
     val fontMultiplier: Float
@@ -63,6 +65,7 @@ object AppSettings {
             lang = Prefs.lang(ctx),
             updateSource = Prefs.updateSource(ctx),
             predictiveBack = Prefs.predictiveBack(ctx),
+            dynamicColor = Prefs.dynamicColor(ctx),
         )
     }
 
@@ -89,6 +92,11 @@ object AppSettings {
     fun setPredictiveBack(ctx: Context, v: Boolean) {
         Prefs.setPredictiveBack(ctx, v)
         _prefs.value = _prefs.value.copy(predictiveBack = v)
+    }
+
+    fun setDynamicColor(ctx: Context, v: Boolean) {
+        Prefs.setDynamicColor(ctx, v)
+        _prefs.value = _prefs.value.copy(dynamicColor = v)
     }
 }
 
@@ -147,6 +155,28 @@ fun SettingsScreen(prefs: AppPrefs, onBack: () -> Unit) {
                         )
                     }
                 }
+                val dynSupported = Build.VERSION.SDK_INT >= 31
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        tr("莫奈取色（动态配色）", "Dynamic Color (Material You)"),
+                        Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = dynSupported && prefs.dynamicColor,
+                        enabled = dynSupported,
+                        onCheckedChange = { AppSettings.setDynamicColor(ctx, it) },
+                    )
+                }
+                Text(
+                    if (dynSupported) tr("跟随系统壁纸自动生成主题配色，即时生效。", "Adapts colors from your system wallpaper immediately.")
+                    else tr("当前系统低于 Android 12，不支持莫奈取色。", "Requires Android 12 or higher."),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             SettingsCard(tr("字体大小", "Font Size")) {

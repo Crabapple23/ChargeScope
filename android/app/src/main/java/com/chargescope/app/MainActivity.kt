@@ -60,6 +60,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -161,9 +163,14 @@ private fun App() {
         2 -> true
         else -> isSystemInDarkTheme()
     }
-    val colors = if (dark) darkColorScheme() else lightColorScheme()
-    val view = LocalView.current
     val ctx = LocalContext.current
+    val colors = when {
+        prefs.dynamicColor && Build.VERSION.SDK_INT >= 31 ->
+            if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+        dark -> darkColorScheme()
+        else -> lightColorScheme()
+    }
+    val view = LocalView.current
     SideEffect {
         (ctx as? ComponentActivity)?.window?.let { w ->
             @Suppress("DEPRECATION")
