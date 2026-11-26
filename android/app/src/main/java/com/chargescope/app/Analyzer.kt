@@ -448,45 +448,45 @@ object Analyzer {
         val driver = if (l4.isEmpty()) null else l4.values.joinToString(" / ") { it.label }
         var predicted = matched.firstOrNull()?.removePrefix("★")?.removeSuffix("（宣告值）") ?: cl.firstOrNull()?.removePrefix("★")
         // Driver says plain USB PD but the advertised ceiling is off the fixed PDO ladder => PPS-style.
+        var ppsReason: String? = null
         if (progAdv && l4["PD"]?.rank == 0 && advVv != null) {
-            predicted = "USB PD PPS" + if (advVv > 21.0 && ext != null) {
-                "（宣告 %.0f V 高于标准 PPS 上限 21 V，疑为 $ext 扩展）".format(advVv)
+            if (advVv > 21.0 && ext != null) {
+                predicted = "USB PD PPS / $ext"
+                ppsReason = "宣告 %.0f V 超出标准 PPS 21 V 上限".format(advVv)
             } else {
-                "（宣告电压超出固定档，推测支持可编程调压）"
+                predicted = "USB PD PPS"
+                ppsReason = "宣告 %.1f V 不在固定档，支持可编程调压".format(advVv)
             }
         }
         val consistent = l4.values.any { c ->
             predicted != null && (predicted.contains(c.family, true) || predicted.contains(c.label, true))
         }
 
-        // Plain-language description combining both layers.
-        val desc = StringBuilder(160)
-        desc.append(
-            if (driver != null) "驱动层（sysfs 的 usb_type / type 等）报告：$driver。"
-            else "驱动层没有报告协议名称（无 Root/Shizuku，或该机型节点不提供）。",
-        )
+        // Concise multi-line summary: 1) driver, 2) prediction + reason, 3) power/ceiling.
+        val lines = ArrayList<String>(3)
+        lines += if (driver != null) "驱动：已报告 $driver" else "驱动：未报告协议名称（无特权或机型未暴露）"
         if (predicted != null) {
-            val basis = ArrayList<String>(2)
-            if (bestV > 5.5) basis += "输入侧约 %.1f V".format(bestV) + (if (bestI > 0) "、%.2f A".format(bestI) else "")
-            else if (maxVin > 5_500_000L) basis += "输入侧出现 %.1f V 高压".format(maxVin / 1e6)
-            else if (derivedVmin > 5.5) basis += "按电池侧功率反推输入电压至少 %.1f V".format(derivedVmin) +
-                (advVv?.let { "、充电器宣告上限 %.1f V".format(it) } ?: "")
-            else if (advV != null) basis += "充电器宣告上限 %.1f V".format(advV / 1e6)
-            desc.append("根据").append(if (basis.isEmpty()) "电压档位和规格表" else basis.joinToString("、") + "及规格表")
-                .append("，预测为：$predicted。这只是缩小范围，不是确认。")
-            if (driver != null) {
-                desc.append(if (consistent) "预测与驱动报告一致。" else "预测与驱动报告不一致，请以驱动报告为准，预测仅供参考。")
-            }
+            val reasons = ArrayList<String>(2)
+            if (bestV > 5.5) reasons += "输入 %.1f V".format(bestV) + (if (bestI > 0) " / %.2f A".format(bestI) else "")
+            else if (maxVin > 5_500_000L) reasons += "输入高压 %.1f V".format(maxVin / 1e6)
+            else if (derivedVmin > 5.5) reasons += "反推输入 ≥ %.1f V".format(derivedVmin)
+            if (ppsReason != null) reasons += ppsReason
+            else if (reasons.isEmpty() && advVv != null) reasons += "参考宣告上限 %.1f V".format(advVv)
+            if (driver != null) reasons += if (consistent) "与驱动一致" else "与驱动不一致，以驱动为准"
+            val note = if (reasons.isEmpty()) "仅供参考" else reasons.joinToString("；") + "，仅供参考"
+            lines += "推测：$predicted（$note）"
         } else {
-            desc.append("输入侧数据不足，暂时无法预测具体协议。")
+            lines += "推测：输入侧数据不足，暂无法预测"
         }
+        val pwr = ArrayList<String>(2)
         if (advV != null && advI != null) {
-            desc.append("充电器宣告上限 %.1f V / %.2f A（约 %.0f W，上限值）。".format(advV / 1e6, advI / 1e6, advV.toDouble() * advI / 1e12))
+            pwr += "充电器上限 %.1f V / %.2f A（约 %.0f W）".format(advV / 1e6, advI / 1e6, advV.toDouble() * advI / 1e12)
         }
         if (batMw != null) {
-            desc.append("当前电池侧估算功率约 %.1f W（仅参考，不能用来确认协议）。".format(batMw / 1000.0))
+            pwr += "电池侧约 %.1f W".format(batMw / 1000.0)
         }
-        val description = desc.toString()
+        if (pwr.isNotEmpty()) lines += "功率：" + pwr.joinToString("；")
+        val description = lines.joinToString("\n")
 
         val candSpecs = candidateSpecsFor(cl, predicted)
 
