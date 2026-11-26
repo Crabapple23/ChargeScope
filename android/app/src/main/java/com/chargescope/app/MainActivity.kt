@@ -15,8 +15,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +35,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
@@ -40,9 +43,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -336,7 +341,12 @@ private fun ProtocolTab() {
     if (a.candidates.isNotEmpty()) {
         Section("候选协议（仅缩小范围，★ 为与本机品牌一致）") { a.candidates.forEach { Text("• $it") } }
     }
-    Section("证据（L4 驱动明示 > L3 输入侧 > L2 功率参考 > L1 品牌）") {
+    if (a.candidateSpecs.isNotEmpty()) {
+        Section("候选协议档位说明（参考上限）") {
+            a.candidateSpecs.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+    Fold("证据（L4 驱动 > L3 输入 > L2 功率 > L1 品牌）", "${a.evidence.size} 条") {
         if (a.evidence.isEmpty()) Text("暂无证据") else a.evidence.sortedByDescending { it.level }.forEach {
             Text("L${it.level}  ${it.text}")
         }
@@ -347,11 +357,112 @@ private fun ProtocolTab() {
 
 // ---------------------------------------------------------------- archive
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -> Unit) {
+    var expanded by remember(e.wallMs, collapsible) { mutableStateOf(!collapsible) }
+    val arrowAngle = animateFloatAsState(
+        targetValue = if (expanded) 90f else 0f,
+        animationSpec = tween(180),
+        label = "archiveArrow",
+    )
+    Card(Modifier.fillMaxWidth()) {
+        Column {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = { if (collapsible) expanded = !expanded },
+                        onLongClick = onLongPress,
+                    )
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("${AppLog.time(e.wallMs)}  ·  ${e.status}", style = MaterialTheme.typography.titleSmall)
+                    if (!expanded) {
+                        Text(e.headline, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (e.note.isNotEmpty()) {
+                            Text("备注：${e.note}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+                if (collapsible) Text("▸", Modifier.graphicsLayer { rotationZ = arrowAngle.value })
+            }
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(tween(200)),
+                exit = shrinkVertically(tween(180)),
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .combinedClickable(onClick = {}, onLongClick = onLongPress)
+                        .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(e.headline)
+                    if (e.note.isNotEmpty()) {
+                        Text("备注：${e.note}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                    KV("设备", e.device)
+                    KV("电量", e.levelPct?.let { "$it %" })
+                    KV("输入电压峰值", fmt(e.maxVinV, "V", 1))
+                    KV("输入功率峰值", fmt(e.maxInputW, "W", 1))
+                    KV("电池侧功率峰值", fmt(e.maxBatteryW, "W", 1))
+                    if (e.description.isNotEmpty()) {
+                        Text("描述", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        Text(e.description, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (e.specText.isNotEmpty()) {
+                        Text("档位说明", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        Text(e.specText, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (e.candidates.isNotEmpty()) {
+                        Text("候选：" + e.candidates.joinToString("；"), style = MaterialTheme.typography.bodySmall)
+                    }
+                    e.evidence.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ArchiveTab() {
     val items by Archive.items.collectAsState()
     val reversed = remember(items) { items.asReversed() }
     var confirm by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<ArchiveEntry?>(null) }
+    var draft by remember { mutableStateOf("") }
+    val collapsible = items.size > 1
+
+    editing?.let { target ->
+        AlertDialog(
+            onDismissRequest = { editing = null },
+            title = { Text("存档备注") },
+            text = {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    placeholder = { Text("例如：原装 120W 头 + 6A 线") },
+                    singleLine = false,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    Archive.updateNote(target.wallMs, draft)
+                    editing = null
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editing = null }) { Text("取消") }
+            },
+        )
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -361,7 +472,7 @@ private fun ArchiveTab() {
         item(key = "header") {
             Section("协议识别存档（${items.size} 条，仅保存在本机）") {
                 Text(
-                    "当出现“已确认 / 可能 / 证据冲突”的识别结果时自动存档；同一次充电内结果变化会新增一条，拔出充电器时写入峰值。",
+                    "当出现“已确认 / 可能 / 证据冲突”的识别结果时自动存档；同一次充电内结果变化会新增一条，拔出充电器时写入峰值。长按任意存档可添加或修改备注。",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedButton(
@@ -376,19 +487,14 @@ private fun ArchiveTab() {
             item(key = "empty") { Text("暂无存档") }
         } else {
             items(reversed, key = { it.wallMs }) { e ->
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("${AppLog.time(e.wallMs)}  ·  ${e.status}", style = MaterialTheme.typography.titleSmall)
-                        Text(e.headline)
-                        KV("设备", e.device)
-                        KV("电量", e.levelPct?.let { "$it %" })
-                        KV("输入电压峰值", fmt(e.maxVinV, "V", 1))
-                        KV("输入功率峰值", fmt(e.maxInputW, "W", 1))
-                        KV("电池侧功率峰值", fmt(e.maxBatteryW, "W", 1))
-                        if (e.candidates.isNotEmpty()) Text("候选：" + e.candidates.joinToString("；"), style = MaterialTheme.typography.bodySmall)
-                        e.evidence.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    }
-                }
+                ArchiveCard(
+                    e = e,
+                    collapsible = collapsible,
+                    onLongPress = {
+                        editing = e
+                        draft = e.note
+                    },
+                )
             }
         }
     }

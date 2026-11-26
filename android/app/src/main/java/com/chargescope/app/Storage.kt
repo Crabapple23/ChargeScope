@@ -88,7 +88,9 @@ object Archive {
         val cur = _items.value.toMutableList()
         val idx = cur.indexOfFirst { it.wallMs == e.wallMs }
         if (idx >= 0) {
-            cur[idx] = e
+            // Preserve any user-edited note if the session peak update overwrites the entry.
+            val keptNote = if (e.note.isEmpty()) cur[idx].note else e.note
+            cur[idx] = e.copy(note = keptNote)
             _items.value = cur
             rewrite()
         } else {
@@ -101,6 +103,16 @@ object Archive {
                 appendLine(e)
             }
         }
+    }
+
+    @Synchronized
+    fun updateNote(wallMs: Long, note: String) {
+        val cur = _items.value.toMutableList()
+        val idx = cur.indexOfFirst { it.wallMs == wallMs }
+        if (idx < 0) return
+        cur[idx] = cur[idx].copy(note = note.trim())
+        _items.value = cur
+        rewrite()
     }
 
     @Synchronized
@@ -145,6 +157,9 @@ object Archive {
         e.maxBatteryW?.let { put("maxBatteryW", it) }
         e.levelPct?.let { put("level", it) }
         put("device", e.device)
+        if (e.description.isNotEmpty()) put("desc", e.description)
+        if (e.specText.isNotEmpty()) put("spec", e.specText)
+        if (e.note.isNotEmpty()) put("note", e.note)
     }
 
     private fun fromJson(o: JSONObject) = ArchiveEntry(
@@ -159,6 +174,9 @@ object Archive {
         maxBatteryW = dbl(o, "maxBatteryW"),
         levelPct = if (o.has("level")) o.getInt("level") else null,
         device = o.optString("device"),
+        description = o.optString("desc"),
+        specText = o.optString("spec"),
+        note = o.optString("note"),
     )
 }
 
@@ -204,7 +222,10 @@ object Report {
         line("## 识别存档（${Archive.items.value.size} 条）")
         for (e in Archive.items.value) {
             line("${AppLog.time(e.wallMs)} [${e.status}] ${e.headline}  电量 ${e.levelPct ?: "—"}%")
+            if (e.note.isNotEmpty()) line("    备注：${e.note}")
             line("    峰值：输入电压 ${e.maxVinV?.let { "%.1f V".format(it) } ?: "—"}，输入功率 ${e.maxInputW?.let { "%.1f W".format(it) } ?: "—"}，电池侧功率 ${e.maxBatteryW?.let { "%.1f W".format(it) } ?: "—"}")
+            if (e.description.isNotEmpty()) line("    描述：${e.description}")
+            if (e.specText.isNotEmpty()) line("    档位说明：${e.specText}")
         }
         line()
         line("## 事件日志")

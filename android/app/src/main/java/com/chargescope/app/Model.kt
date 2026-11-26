@@ -49,6 +49,8 @@ data class Analysis(
     val description: String = "",
     /** Electrical specification reference for the confirmed protocol (null if not confirmed). */
     val protocolSpec: String? = null,
+    /** Gear/tier specifications for candidate/predicted protocols. */
+    val candidateSpecs: List<String> = emptyList(),
 )
 
 data class Metrics(
@@ -95,6 +97,9 @@ data class ArchiveEntry(
     val maxBatteryW: Double?,
     val levelPct: Int?,
     val device: String,
+    val description: String = "",
+    val specText: String = "",
+    val note: String = "",
 )
 
 data class UiState(

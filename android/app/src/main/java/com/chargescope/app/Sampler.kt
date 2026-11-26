@@ -368,6 +368,9 @@ object Sampler {
             if (analysis.key.isNotEmpty() && analysis.key != archivedKey) {
                 finishEntry()
                 archivedKey = analysis.key
+                val specParts = ArrayList<String>(4)
+                analysis.protocolSpec?.let { specParts += "已确认协议：$it" }
+                specParts.addAll(analysis.candidateSpecs)
                 val e = ArchiveEntry(
                     wallMs = s.wallMs,
                     status = analysis.status.label,
@@ -378,6 +381,8 @@ object Sampler {
                     maxVinV = peakVin, maxInputW = peakInW, maxBatteryW = peakBatW,
                     levelPct = s.levelPct,
                     device = "${Build.MANUFACTURER} ${Build.MODEL}",
+                    description = analysis.description,
+                    specText = specParts.joinToString("\n"),
                 )
                 archivedEntry = e
                 Archive.upsert(e)

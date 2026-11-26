@@ -172,6 +172,34 @@ object Analyzer {
         "SDP 标准下行口" to "USB 标准数据口（非快充，常见于普通电脑口）：5V，通常上限 0.5A–0.9A（约 2.5W–4.5W）。",
     )
 
+    private val CANDIDATE_TIER_SPECS = listOf(
+        arrayOf("小米", "HyperCharge", "Mi PPS") to "小米 HyperCharge / Mi PPS：33W (11V/3A)、67W (11V/6.1A 或 20V/3.25A)、90W (20V/4.5A)、120W (20V/6A)；魔改 PPS，需原厂/认证 6A 线缆。",
+        arrayOf("OPPO", "SuperVOOC", "VOOC") to "OPPO VOOC / SuperVOOC：30W (5V/6A)、65W (10V/6.5A)、80W (11V/7.3A)、100W (11V/9.1A)、150W (20V/7.5A)、240W (20V/12A)；需原厂/认证大电流线缆。",
+        arrayOf("vivo", "FlashCharge") to "vivo / iQOO FlashCharge：44W (11V/4A)、66W (11V/6A)、80W (20V/4A)、120W (20V/6A)、200W (20V/10A)。",
+        arrayOf("华为", "SCP", "FCP") to "华为 FCP / SCP：18W (9V/2A)、22.5W (4.5V/5A 或 10V/2.25A)、40W (10V/4A)、66W (11V/6A)、88W (20V/4.4A)、100W (20V/5A)。",
+        arrayOf("荣耀") to "荣耀 SuperCharge：66W (11V/6A)、80W (20V/4A)、100W (20V/5A)；同时较好兼容宽幅 PPS 与 UFCS。",
+        arrayOf("三星", "AFC", "SFC") to "三星 AFC / SFC：15W AFC (9V/1.67A)、25W PPS (9V/2.77A)、45W PPS (11V/4.05A 或 9V/5A，需 5A E-Marker 线)。",
+        arrayOf("魅族", "红魔", "NeoCharger", "mCharge") to "魅族 / 红魔：80W (20V/4A) 至 165W (20V/8.25A)，基于大电流 PPS。",
+        arrayOf("PPS") to "USB PD 3.0 PPS：3.3V–21V（标准最大 5A / 100W），步进 20mV / 50mA；>3A 需 5A E-Marker 线缆。",
+        arrayOf("UFCS") to "UFCS 融合快充：通用档 33W (11V/3A)、44W (11V/4A)；高阶互认档 65W (10V/6.5A 或 20V/3.25A)、100W (20V/5A)；步进 10–20mV。",
+        arrayOf("QC 3") to "QC 3.0：3.6V–20V 连续可调，步进 200mV，最大 3A（18W–27W）。",
+        arrayOf("QC 2") to "QC 2.0：固定 5V / 9V / 12V / 20V，最大 3A（18W–36W）。",
+        arrayOf("USB PD", "PD 固定") to "USB PD 固定档：5V/3A、9V/3A (27W)、15V/3A (45W)、20V/3A (60W)、20V/5A (100W)；PD 3.1 EPR 扩展至 28V/36V/48V 5A (140W–240W)。",
+    )
+
+    internal fun candidateSpecsFor(candidates: List<String>, predicted: String?): List<String> {
+        if (candidates.isEmpty() && predicted == null) return emptyList()
+        val combined = buildString {
+            if (predicted != null) append(predicted).append(' ')
+            for (c in candidates) append(c).append(' ')
+        }
+        val out = LinkedHashSet<String>()
+        for ((keys, spec) in CANDIDATE_TIER_SPECS) {
+            if (keys.any { combined.contains(it, ignoreCase = true) }) out += spec
+        }
+        return out.toList()
+    }
+
     private val BRAND_SHORT = mapOf(
         "小米" to "小米 HyperCharge / Mi PPS",
         "OPPO" to "OPPO VOOC / SuperVOOC",
@@ -460,8 +488,10 @@ object Analyzer {
         }
         val description = desc.toString()
 
+        val candSpecs = candidateSpecsFor(cl, predicted)
+
         fun mk(status: Status, headline: String, key: String, spec: String? = null) =
-            Analysis(status, headline, evidence, limits, cl, key, driver, predicted, description, spec)
+            Analysis(status, headline, evidence, limits, cl, key, driver, predicted, description, spec, candSpecs)
 
         return when {
             l4.size > 1 -> mk(

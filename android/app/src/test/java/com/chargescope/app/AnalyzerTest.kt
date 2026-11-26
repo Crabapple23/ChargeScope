@@ -95,6 +95,7 @@ class AnalyzerTest {
         assertTrue(a.predicted?.startsWith("USB PD PPS") == true)
         assertTrue(a.evidence.any { "反推" in it.text })
         assertTrue(a.candidates.any { "HyperCharge" in it })
+        assertTrue(a.candidateSpecs.any { "120W" in it })
     }
 
     @Test fun powerBoundProvesHighVoltageEvenWithoutDriverName() {
