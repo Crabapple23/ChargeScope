@@ -301,7 +301,7 @@ fun SettingsScreen(
             }
 
             SettingsCard(tr("关于", "About")) {
-                Text("充了个电 (ChargeScope) v0.4.0", style = MaterialTheme.typography.bodyMedium)
+                Text("充了个电 (ChargeScope) v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
                 Text(
                     "com.chargescope.hanhan.app",
                     style = MaterialTheme.typography.bodySmall,

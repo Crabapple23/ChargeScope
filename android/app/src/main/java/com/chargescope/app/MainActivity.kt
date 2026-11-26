@@ -113,6 +113,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             AppLog.init(applicationContext)
             Archive.init(applicationContext)
+            Recorder.init(applicationContext)
         }
         // Re-arm auto-record after onboarding (service may have been killed); allowed because we are in the foreground.
         if (Prefs.onboardingDone(this) && Prefs.autoRecord(this)) {
@@ -361,15 +362,21 @@ private fun fmtBytes(b: Long): String = when {
     else -> "%.2f MB".format(b / (1024.0 * 1024.0))
 }
 
-private fun statusText(s: Int?) = when (s) {
+private fun statusText(s: Int?, isEn: Boolean = false) = if (isEn) when (s) {
+    2 -> "Charging"; 3 -> "Discharging"; 4 -> "Not Charging"; 5 -> "Full"; else -> null
+} else when (s) {
     2 -> "充电中"; 3 -> "放电中"; 4 -> "未充电"; 5 -> "已充满"; else -> null
 }
 
-private fun pluggedText(p: Int) = when (p) {
+private fun pluggedText(p: Int, isEn: Boolean = false) = if (isEn) when (p) {
+    0 -> "Unplugged"; 1 -> "AC"; 2 -> "USB"; 4 -> "Wireless"; 8 -> "Dock"; else -> "Other($p)"
+} else when (p) {
     0 -> "未连接"; 1 -> "交流电源"; 2 -> "USB"; 4 -> "无线"; 8 -> "底座"; else -> "其他($p)"
 }
 
-private fun healthText(h: Int?) = when (h) {
+private fun healthText(h: Int?, isEn: Boolean = false) = if (isEn) when (h) {
+    2 -> "Good"; 3 -> "Overheat"; 4 -> "Dead"; 5 -> "Over Voltage"; 6 -> "Failure"; 7 -> "Cold"; else -> null
+} else when (h) {
     2 -> "良好"; 3 -> "过热"; 4 -> "损坏"; 5 -> "过压"; 6 -> "故障"; 7 -> "过冷"; else -> null
 }
 
@@ -379,11 +386,12 @@ private fun healthText(h: Int?) = when (h) {
 private fun RealtimeTab() {
     val ui by Sampler.state.collectAsState()
     val ctx = LocalContext.current
+    val isEn = LocalIsEn.current
     val s = ui.latest
     Section(tr("电池（公开 API）", "Battery (Public API)")) {
         KV(tr("电量", "Level"), s?.levelPct?.let { "$it %" })
-        KV(tr("状态", "Status"), statusText(s?.status))
-        KV(tr("连接方式", "Plugged"), s?.let { pluggedText(it.plugged) })
+        KV(tr("状态", "Status"), statusText(s?.status, isEn))
+        KV(tr("连接方式", "Plugged"), s?.let { pluggedText(it.plugged, isEn) })
         KV(tr("电池端电压", "Battery Voltage"), fmt(s?.voltageMv?.let { it / 1000.0 }, "V"))
         KV(tr("电池电流（绝对值）", "Battery Current"), fmt(s?.let { Analyzer.currentMa(it) }, "mA", 0))
         KV(tr("电池侧功率（估算）", "Battery Power (Est.)"), fmt(ui.batteryPowerW, "W"))
@@ -392,7 +400,7 @@ private fun RealtimeTab() {
             KV(tr("估算转换效率", "Est. Efficiency"), "%.1f %%".format(eff))
         }
         KV(tr("温度", "Temperature"), fmt(s?.tempDeci?.let { it / 10.0 }, "°C", 1))
-        val hText = healthText(s?.health)
+        val hText = healthText(s?.health, isEn)
         val hPct = s?.let { Analyzer.batteryHealthPct(it) }
         val cycles = s?.let { Analyzer.batteryCycleCount(it) }
         val healthDisplay = buildList {
@@ -455,7 +463,7 @@ private fun PowerChart(series: Series) {
     val inColor = MaterialTheme.colorScheme.tertiary
     val grid = MaterialTheme.colorScheme.outlineVariant
     if (series.validCount < 2) {
-        Text("等待数据…（至少需要 2 个采样点）")
+        Text(tr("等待数据…（至少需要 2 个采样点）", "Waiting for data… (at least 2 samples needed)"))
         return
     }
     val maxV = niceMax(series.maxW)
@@ -502,16 +510,19 @@ private fun PowerChart(series: Series) {
         }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("← ${series.spanSec} 秒前", style = small)
-        Text("现在", style = small)
+        Text(tr("← ${series.spanSec} 秒前", "← ${series.spanSec}s ago"), style = small)
+        Text(tr("现在", "Now"), style = small)
     }
     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        LegendDot(batColor, "电池侧功率（估算）")
-        if (series.hasInput) LegendDot(inColor, "输入侧功率")
+        LegendDot(batColor, tr("电池侧功率（估算）", "Battery Power (Est.)"))
+        if (series.hasInput) LegendDot(inColor, tr("输入侧功率", "Input Power"))
     }
     Text(
-        "纵轴：功率（瓦）；横轴：时间，最右为当前。电池侧功率 = 电池端电压 × |电池电流|，是进入电池的功率，" +
-            "会低于充电器输出。输入侧功率 = 充电口电压 × 电流，仅在 Root/Shizuku 能读取时显示。",
+        tr(
+            "纵轴：功率（瓦）；横轴：时间，最右为当前。电池侧功率 = 电池端电压 × |电池电流|，是进入电池的功率，" +
+                "会低于充电器输出。输入侧功率 = 充电口电压 × 电流，仅在 Root/Shizuku 能读取时显示。",
+            "Y-axis: power (W); X-axis: time (now on right). Battery power = V_bat × |I_bat| (lower than charger output). Input power requires Root/Shizuku.",
+        ),
         style = small,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -523,7 +534,7 @@ private fun PowerChart(series: Series) {
 private fun ProtocolTab() {
     val ui by Sampler.state.collectAsState()
     val a = ui.analysis
-    if (a == null) { Text("等待首次采样…"); return }
+    if (a == null) { Text(tr("等待首次采样…", "Waiting for first sample…")); return }
     Section(tr("结论：${a.status.label}", "Conclusion: ${a.status.name}")) {
         Text(a.headline, style = MaterialTheme.typography.titleSmall)
         KV(tr("驱动报告协议", "Driver Protocol"), a.driver ?: tr("未报告", "None"))
@@ -582,7 +593,7 @@ private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -
                     if (!expanded) {
                         Text(e.headline, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (e.note.isNotEmpty()) {
-                            Text("备注：${e.note}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                            Text(tr("备注：${e.note}", "Note: ${e.note}"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -602,23 +613,23 @@ private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -
                 ) {
                     Text(e.headline)
                     if (e.note.isNotEmpty()) {
-                        Text("备注：${e.note}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        Text(tr("备注：${e.note}", "Note: ${e.note}"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
-                    KV("设备", e.device)
-                    KV("电量", e.levelPct?.let { "$it %" })
-                    KV("输入电压峰值", fmt(e.maxVinV, "V", 1))
-                    KV("输入功率峰值", fmt(e.maxInputW, "W", 1))
-                    KV("电池侧功率峰值", fmt(e.maxBatteryW, "W", 1))
+                    KV(tr("设备", "Device"), e.device)
+                    KV(tr("电量", "Level"), e.levelPct?.let { "$it %" })
+                    KV(tr("输入电压峰值", "Peak Input Voltage"), fmt(e.maxVinV, "V", 1))
+                    KV(tr("输入功率峰值", "Peak Input Power"), fmt(e.maxInputW, "W", 1))
+                    KV(tr("电池侧功率峰值", "Peak Battery Power"), fmt(e.maxBatteryW, "W", 1))
                     if (e.description.isNotEmpty()) {
-                        Text("描述", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        Text(tr("描述", "Summary"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                         Text(e.description, style = MaterialTheme.typography.bodySmall)
                     }
                     if (e.specText.isNotEmpty()) {
-                        Text("档位说明", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        Text(tr("档位说明", "Tier Specs"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                         Text(e.specText, style = MaterialTheme.typography.bodySmall)
                     }
                     if (e.candidates.isNotEmpty()) {
-                        Text("候选：" + e.candidates.joinToString("；"), style = MaterialTheme.typography.bodySmall)
+                        Text(tr("候选：", "Candidates: ") + e.candidates.joinToString("；"), style = MaterialTheme.typography.bodySmall)
                     }
                     e.evidence.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
@@ -642,12 +653,12 @@ private fun ArchiveTab() {
     editing?.let { target ->
         AlertDialog(
             onDismissRequest = { editing = null },
-            title = { Text("存档备注") },
+            title = { Text(tr("存档备注", "Archive Note")) },
             text = {
                 OutlinedTextField(
                     value = draft,
                     onValueChange = { draft = it },
-                    placeholder = { Text("例如：原装 120W 头 + 6A 线") },
+                    placeholder = { Text(tr("例如：原装 120W 头 + 6A 线", "e.g., OEM 120W brick + 6A cable")) },
                     singleLine = false,
                     maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
@@ -657,10 +668,10 @@ private fun ArchiveTab() {
                 TextButton(onClick = {
                     Archive.updateNote(target.wallMs, draft)
                     editing = null
-                }) { Text("保存") }
+                }) { Text(tr("保存", "Save")) }
             },
             dismissButton = {
-                TextButton(onClick = { editing = null }) { Text("取消") }
+                TextButton(onClick = { editing = null }) { Text(tr("取消", "Cancel")) }
             },
         )
     }
@@ -671,9 +682,12 @@ private fun ArchiveTab() {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item(key = "header") {
-            Section("协议识别存档（${items.size} 条，仅保存在本机）") {
+            Section(tr("协议识别存档（${items.size} 条，仅保存在本机）", "Protocol Archive (${items.size}, local only)")) {
                 Text(
-                    "当出现“已确认 / 可能 / 证据冲突”的识别结果时自动存档；同一次充电内结果变化会新增一条，拔出充电器时写入峰值。长按任意存档可添加或修改备注。",
+                    tr(
+                        "当出现“已确认 / 可能 / 证据冲突”的识别结果时自动存档；同一次充电内结果变化会新增一条，拔出充电器时写入峰值。长按任意存档可添加或修改备注。",
+                        "Auto-saved on Confirmed / Likely / Conflicting results; updates peaks on unplug. Long-press any entry to edit its note.",
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedButton(
@@ -692,7 +706,7 @@ private fun ArchiveTab() {
             }
         }
         if (reversed.isEmpty()) {
-            item(key = "empty") { Text("暂无存档") }
+            item(key = "empty") { Text(tr("暂无存档", "No archives yet")) }
         } else {
             items(reversed, key = { it.wallMs }) { e ->
                 ArchiveCard(
@@ -885,6 +899,11 @@ private fun DataTab() {
 
     msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
+    val csvOkMsg = tr("CSV 已导出", "CSV exported")
+    val csvFailMsg = tr("导出失败（尚无记录？）", "Export failed (no records yet?)")
+    val logOkMsg = tr("诊断日志已导出", "Diagnostic log exported")
+    val logFailMsg = tr("日志导出失败", "Log export failed")
+
     val exportCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) scope.launch {
             val ok = withContext(Dispatchers.IO) {
@@ -892,7 +911,7 @@ private fun DataTab() {
                     ctx.contentResolver.openOutputStream(uri)?.use { out -> Recorder.exportTo(ctx, out) } ?: false
                 } catch (e: Exception) { false }
             }
-            msg = if (ok) "CSV 已导出" else "导出失败（尚无记录？）"
+            msg = if (ok) csvOkMsg else csvFailMsg
         }
     }
     val exportLog = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
@@ -904,7 +923,7 @@ private fun DataTab() {
                     true
                 } catch (e: Exception) { false }
             }
-            msg = if (ok) "诊断日志已导出" else "日志导出失败"
+            msg = if (ok) logOkMsg else logFailMsg
         }
     }
 
@@ -914,8 +933,22 @@ private fun DataTab() {
         SamplingService.send(ctx, SamplingService.ACTION_ARM)
     }
 
+    val isEn = LocalIsEn.current
+    val intervalOpts = remember(isEn) {
+        if (isEn) listOf("1s" to 1000L, "2s" to 2000L, "5s" to 5000L) else INTERVAL_OPTS
+    }
+    val minOpts = remember(isEn) {
+        if (isEn) listOf("30m" to 30L, "1h" to 60L, "2h" to 120L, "No limit" to 0L) else MIN_OPTS
+    }
+    val socOpts = remember(isEn) {
+        if (isEn) listOf("80%" to 80L, "90%" to 90L, "100%" to 100L, "Any" to 0L) else SOC_OPTS
+    }
+    val privOpts = remember(isEn) {
+        if (isEn) listOf("Off" to 0L, "Root" to 1L, "Shizuku" to 2L) else PRIV_OPTS
+    }
+
     Fold(tr("采样间隔", "Sampling Interval"), tr("${interval / 1000} 秒", "${interval / 1000}s")) {
-        Chips(INTERVAL_OPTS, interval) { interval = it; Prefs.setIntervalMs(ctx, it) }
+        Chips(intervalOpts, interval) { interval = it; Prefs.setIntervalMs(ctx, it) }
     }
     Fold(tr("自动记录", "Auto Record"), if (auto) tr("已开启", "On") else tr("已关闭", "Off")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -944,9 +977,9 @@ private fun DataTab() {
         Text(tr("电池温度上限", "Max Battery Temp"), style = MaterialTheme.typography.labelLarge)
         Chips(TEMP_OPTS, maxTemp) { maxTemp = it; Prefs.setLong(ctx, Prefs.TEMP, it) }
         Text(tr("单次最长时长", "Max Session Duration"), style = MaterialTheme.typography.labelLarge)
-        Chips(MIN_OPTS, maxMin) { maxMin = it; Prefs.setLong(ctx, Prefs.MINUTES, it) }
+        Chips(minOpts, maxMin) { maxMin = it; Prefs.setLong(ctx, Prefs.MINUTES, it) }
         Text(tr("电量达到后停止", "Stop at SOC"), style = MaterialTheme.typography.labelLarge)
-        Chips(SOC_OPTS, stopSoc) { stopSoc = it; Prefs.setLong(ctx, Prefs.SOC, it) }
+        Chips(socOpts, stopSoc) { stopSoc = it; Prefs.setLong(ctx, Prefs.SOC, it) }
         Text(tr("记录文件大小上限（压缩后）", "Max Log File Size (GZIP)"), style = MaterialTheme.typography.labelLarge)
         Chips(MB_OPTS, maxMb) { maxMb = it; Prefs.setLong(ctx, Prefs.FILE_MB, it) }
     }
@@ -954,39 +987,39 @@ private fun DataTab() {
         tr("特权增强（默认关闭，只读）", "Privileged Mode (Read-only)"),
         when (mode) { 1L -> "Root"; 2L -> "Shizuku"; else -> tr("关闭", "Off") },
     ) {
-        Chips(PRIV_OPTS, mode) {
+        Chips(privOpts, mode) {
             mode = it
             Sampler.onPrivModeChanged(ctx, it.toInt())
         }
         if (mode == 1L) {
-            Text("Root 管理器：" + (rootProvider?.label ?: "未检测到 Magisk / KernelSU / APatch"))
-            Text("兼容 Magisk、KernelSU、APatch：复用单个持久 su 会话，减少反复授权与进程开销。", style = MaterialTheme.typography.bodySmall)
+            Text(tr("Root 管理器：", "Root Manager: ") + (rootProvider?.label ?: tr("未检测到 Magisk / KernelSU / APatch", "Magisk / KernelSU / APatch not detected")))
+            Text(tr("兼容 Magisk、KernelSU、APatch：复用单个持久 su 会话，减少反复授权与进程开销。", "Supports Magisk, KernelSU, and APatch via one persistent su session."), style = MaterialTheme.typography.bodySmall)
             OutlinedButton(
                 enabled = !checking,
                 onClick = { Sampler.startProbe(ctx, 1) },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (checking) "正在检测…" else "检测 Root 授权") }
+            ) { Text(if (checking) tr("正在检测…", "Probing…") else tr("检测 Root 授权", "Test Root Access")) }
         }
         if (mode == 2L) {
-            Text("状态：" + shz.label)
+            Text(tr("状态：", "Status: ") + shz.label)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     enabled = !checking,
                     onClick = { ShizukuBridge.requestPermission() },
-                ) { Text("申请授权") }
+                ) { Text(tr("申请授权", "Request Access")) }
                 OutlinedButton(
                     enabled = !checking,
                     onClick = { Sampler.startProbe(ctx, 2) },
-                ) { Text(if (checking) "检测中…" else "检测") }
+                ) { Text(if (checking) tr("检测中…", "Probing…") else tr("检测", "Test")) }
             }
             Text(
-                "Shizuku 提供 adb shell 权限：直接读取 sysfs 与 dumpsys battery，不派生额外 shell 进程。",
+                tr("Shizuku 提供 adb shell 权限：直接读取 sysfs 与 dumpsys battery，不派生额外 shell 进程。", "Shizuku provides adb shell access to read sysfs and dumpsys battery without extra shells."),
                 style = MaterialTheme.typography.bodySmall,
             )
         }
         privMsg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         Text(
-            "只执行固定只读采集，不写任何节点；失败会退避，连续失败 3 次自动关闭。",
+            tr("只执行固定只读采集，不写任何节点；失败会退避，连续失败 3 次自动关闭。", "Fixed read-only queries only; backs off on errors and auto-disables after 3 consecutive failures."),
             style = MaterialTheme.typography.bodySmall,
         )
         rootError?.let { Text(it, color = MaterialTheme.colorScheme.error) }

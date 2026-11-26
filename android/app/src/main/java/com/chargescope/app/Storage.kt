@@ -187,7 +187,7 @@ object Report {
         fun line(s: String = "") { sb.append(s).append('\n') }
         line("# 充了个电 (ChargeScope) 诊断日志")
         line("生成时间：" + AppLog.time(System.currentTimeMillis()))
-        line("应用版本：0.4.0")
+        line("应用版本：${BuildConfig.VERSION_NAME}")
         line("设备：${Build.MANUFACTURER} ${Build.MODEL}  Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         if (Build.VERSION.SDK_INT >= 31) line("SoC：${Build.SOC_MODEL}")
         line()

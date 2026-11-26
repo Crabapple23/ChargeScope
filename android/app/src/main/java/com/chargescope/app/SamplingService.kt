@@ -3,12 +3,14 @@ package com.chargescope.app
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
@@ -62,6 +64,7 @@ class SamplingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         AppLog.init(applicationContext)
         Archive.init(applicationContext)
+        Recorder.init(applicationContext)
         ensureForeground()
         AppLog.i("服务指令：${intent?.action ?: "手动开始"}")
         when (intent?.action) {
@@ -121,7 +124,10 @@ class SamplingService : Service() {
                 }
                 if (n++ % 5 == 0) {
                     val p = s?.let { Analyzer.powerMw(it) }
-                    postNote("记录中 · 电量 ${s?.levelPct ?: "—"}%" + (p?.let { "  ·  %.1f W".format(it / 1000.0) } ?: ""))
+                    postNote(
+                        "记录中 · 电量 ${s?.levelPct ?: "—"}%" + (p?.let { "  ·  %.1f W".format(it / 1000.0) } ?: ""),
+                        showStopAction = true,
+                    )
                 }
                 delay(Prefs.intervalMs(app))
             }
@@ -174,17 +180,48 @@ class SamplingService : Service() {
         )
     }
 
-    private fun postNote(text: String) =
-        getSystemService(NotificationManager::class.java).notify(ID, notification(text))
+    private fun postNote(text: String, showStopAction: Boolean = false) =
+        getSystemService(NotificationManager::class.java).notify(ID, notification(text, showStopAction))
 
-    private fun notification(text: String): Notification =
-        Notification.Builder(this, CHANNEL)
+    private fun contentIntent(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun stopActionIntent(): PendingIntent {
+        val intent = Intent(this, SamplingService::class.java).apply {
+            action = ACTION_STOP_REC
+        }
+        return PendingIntent.getService(
+            this, 1, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun notification(text: String, showStopAction: Boolean = false): Notification {
+        val builder = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
             .setContentTitle("充了个电")
             .setContentText(text)
+            .setContentIntent(contentIntent())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .build()
+        if (showStopAction) {
+            builder.addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+                    "停止记录",
+                    stopActionIntent(),
+                ).build(),
+            )
+        }
+        return builder.build()
+    }
 
     override fun onDestroy() {
         if (receiverOn) {
