@@ -6,9 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AnalyzerTest {
-    private fun snap(nodes: List<RootNode> = emptyList(), plugged: Int = 2, ua: Long? = -1_500_000L) = Snapshot(
+    private fun snap(nodes: List<RootNode> = emptyList(), plugged: Int = 2, ua: Long? = -1_500_000L, mv: Int = 4000) = Snapshot(
         elapsedMs = 0, wallMs = 0, levelPct = 50, status = 2, plugged = plugged, health = 2,
-        voltageMv = 4000, tempDeci = 300, currentUa = ua, currentAvgUa = null, chargeCounterUah = null,
+        voltageMv = mv, tempDeci = 300, currentUa = ua, currentAvgUa = null, chargeCounterUah = null,
         rootNodes = nodes,
     )
 
@@ -81,6 +81,27 @@ class AnalyzerTest {
         val inp = Analyzer.input(snap(listOf(gauge, cp)))
         assertNull(inp.voltageUv)
         assertNull(inp.currentUa)
+    }
+
+    @Test fun infersFastChargingFromLogWithoutInputReadings() {
+        // Real Xiaomi/MT6991 log: usb node has no readable voltage, but dumpsys advertises 22V/3.225A
+        // and the battery takes ~30W, which is impossible at 5V within 3.2A.
+        val usb = RootNode("usb", mapOf("type" to "USB_DCP", "online" to "1", "present" to "1", "voltage_now" to "0", "real_type" to "USB_PD"))
+        val chg = RootNode("primary_chg", mapOf("type" to "USB_DCP", "online" to "5", "usb_type" to "Unknown SDP CDP [DCP]"))
+        val dump = RootNode("dumpsys", mapOf("max_charging_voltage" to "22000000", "max_charging_current" to "3225000"))
+        val a = Analyzer.analyze(listOf(snap(listOf(usb, chg, dump), ua = -7_101_000L, mv = 4312)), "Xiaomi")
+        assertEquals(Status.CONFIRMED, a.status)
+        assertEquals("USB PD", a.driver)
+        assertTrue(a.predicted?.startsWith("USB PD PPS") == true)
+        assertTrue(a.evidence.any { "反推" in it.text })
+        assertTrue(a.candidates.any { "HyperCharge" in it })
+    }
+
+    @Test fun powerBoundProvesHighVoltageEvenWithoutDriverName() {
+        val dump = RootNode("dumpsys", mapOf("max_charging_voltage" to "9000000", "max_charging_current" to "3000000"))
+        val a = Analyzer.analyze(listOf(snap(listOf(dump), ua = -7_000_000L, mv = 4300)))
+        assertEquals(Status.POSSIBLE, a.status)
+        assertTrue(a.evidence.any { "反推" in it.text })
     }
 
     @Test fun parseRootOutput() {

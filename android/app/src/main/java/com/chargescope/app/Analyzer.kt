@@ -172,6 +172,16 @@ object Analyzer {
         "SDP 标准下行口" to "USB 标准数据口（非快充，常见于普通电脑口）：5V，通常上限 0.5A–0.9A（约 2.5W–4.5W）。",
     )
 
+    private val BRAND_SHORT = mapOf(
+        "小米" to "小米 HyperCharge / Mi PPS",
+        "OPPO" to "OPPO VOOC / SuperVOOC",
+        "vivo" to "vivo FlashCharge",
+        "华为" to "华为 FCP / SCP",
+        "荣耀" to "荣耀 SuperCharge",
+        "三星" to "三星 AFC / PPS",
+        "魅族/努比亚" to "魅族 Super mCharge / 红魔 NeoCharger",
+    )
+
     private val BRAND_PROTOCOLS = mapOf(
         "小米" to "HyperCharge / Mi PPS（魔改 PD PPS，电流上限放宽至 6A 左右）",
         "OPPO" to "VOOC / SuperVOOC（私有加密握手）",
@@ -331,6 +341,52 @@ object Analyzer {
         }
         voltagePattern(vols, volCount, evidence, candidates)
 
+        // ---- Inference without live input readings (many devices expose none) -------------------
+        // Smoothed battery-side power over the last <=10 samples.
+        var pbSum = 0.0; var pbN = 0
+        for (idx in (window.size - 10).coerceAtLeast(0) until window.size) {
+            powerMw(window[idx])?.let { pbSum += it; pbN++ }
+        }
+        val batAvgW = if (pbN > 0) pbSum / pbN / 1000.0 else null
+        val advVv = advV?.let { it / 1e6 }
+        var progAdv = false
+        var derivedVmin = 0.0
+        if (advVv != null && advVv > 5.5) {
+            if (FIXED_VOLTS.any { abs(advVv - it) <= 0.35 }) {
+                evidence += Evidence(3, "充电器宣告上限 %.0f V 正好落在固定档位，至少支持固定档快充".format(advVv))
+                candidates += "USB PD 固定档 / QC 2.0 / AFC"
+            } else {
+                progAdv = true
+                evidence += Evidence(
+                    3,
+                    "充电器宣告上限 %.1f V 不在 9/12/15/20/28V 固定档上，说明提供可编程调压范围（PPS / UFCS / 厂商私有）".format(advVv),
+                )
+                candidates += "PPS / UFCS / QC 3.0 / 厂商私有"
+                if (advVv > 21.0) {
+                    evidence += Evidence(3, "宣告 %.1f V 高于标准 USB PD PPS 的 21 V 上限，更像厂商扩展协议".format(advVv))
+                }
+            }
+        }
+        if (last.isCharging && advI != null && batAvgW != null && batAvgW >= 5.0) {
+            val advA = advI / 1e6
+            // Input current cannot exceed the advertised limit, and input power >= battery power,
+            // so Vin >= Pbat / Iadv (lossless lower bound).
+            derivedVmin = batAvgW / advA
+            evidence += Evidence(
+                3,
+                "按电池侧平均功率约 %.1f W 反推：输入电流不超过宣告上限 %.2f A，输入电压至少约 %.1f V（未计损耗的下限）".format(batAvgW, advA, derivedVmin) +
+                    if (derivedVmin > 5.5) "，说明已进入高压协商而不是 5V 基础充电" else "",
+            )
+            if (derivedVmin > 5.5 && candidates.isEmpty()) candidates += "高压快充协议（PD / PPS / UFCS / QC / 私有）"
+            if (advVv != null && batAvgW > advVv * advA * 1.05) {
+                limits += "电池侧功率已超过充电器宣告上限（%.0f W），宣告值可能不准确。".format(advVv * advA)
+            }
+        }
+        val ext = brand?.let { BRAND_SHORT[it] }
+        if (progAdv && ext != null && advVv != null && advVv > 21.0) {
+            candidates += "★$ext（宣告电压超出标准 PPS 上限，疑为厂商扩展）"
+        }
+
         val matched = when {
             bestP > 0 && bestV > 5.5 && bestI >= 0.5 -> match(bestV, bestI, brand)
             advV != null && advV > 5_500_000L && advI != null -> match(advV / 1e6, advI / 1e6, brand, "（宣告值）")
@@ -362,7 +418,15 @@ object Analyzer {
 
         val cl = candidates.toList()
         val driver = if (l4.isEmpty()) null else l4.values.joinToString(" / ") { it.label }
-        val predicted = matched.firstOrNull()?.removePrefix("★")?.removeSuffix("（宣告值）") ?: cl.firstOrNull()
+        var predicted = matched.firstOrNull()?.removePrefix("★")?.removeSuffix("（宣告值）") ?: cl.firstOrNull()?.removePrefix("★")
+        // Driver says plain USB PD but the advertised ceiling is off the fixed PDO ladder => PPS-style.
+        if (progAdv && l4["PD"]?.rank == 0 && advVv != null) {
+            predicted = "USB PD PPS" + if (advVv > 21.0 && ext != null) {
+                "（宣告 %.0f V 高于标准 PPS 上限 21 V，疑为 $ext 扩展）".format(advVv)
+            } else {
+                "（宣告电压超出固定档，推测支持可编程调压）"
+            }
+        }
         val consistent = l4.values.any { c ->
             predicted != null && (predicted.contains(c.family, true) || predicted.contains(c.label, true))
         }
@@ -377,6 +441,8 @@ object Analyzer {
             val basis = ArrayList<String>(2)
             if (bestV > 5.5) basis += "输入侧约 %.1f V".format(bestV) + (if (bestI > 0) "、%.2f A".format(bestI) else "")
             else if (maxVin > 5_500_000L) basis += "输入侧出现 %.1f V 高压".format(maxVin / 1e6)
+            else if (derivedVmin > 5.5) basis += "按电池侧功率反推输入电压至少 %.1f V".format(derivedVmin) +
+                (advVv?.let { "、充电器宣告上限 %.1f V".format(it) } ?: "")
             else if (advV != null) basis += "充电器宣告上限 %.1f V".format(advV / 1e6)
             desc.append("根据").append(if (basis.isEmpty()) "电压档位和规格表" else basis.joinToString("、") + "及规格表")
                 .append("，预测为：$predicted。这只是缩小范围，不是确认。")
@@ -412,10 +478,13 @@ object Analyzer {
                     PROTOCOL_SPECS[c.label],
                 )
             }
-            maxVin > 5_500_000L || matched.isNotEmpty() -> mk(
+            maxVin > 5_500_000L || matched.isNotEmpty() || derivedVmin > 5.5 || progAdv -> mk(
                 Status.POSSIBLE,
-                (if (maxVin > 5_500_000L) "输入侧出现 %.1f V 高压，疑似快充协商".format(maxVin / 1e6) else "充电器宣告支持高压") +
-                    (if (predicted != null) "；预测：$predicted" else "，但无法确定具体协议"),
+                when {
+                    maxVin > 5_500_000L -> "输入侧出现 %.1f V 高压，疑似快充协商".format(maxVin / 1e6)
+                    derivedVmin > 5.5 -> "按功率反推输入电压至少 %.1f V，疑似高压快充".format(derivedVmin)
+                    else -> "充电器宣告支持高压"
+                } + (if (predicted != null) "；预测：$predicted" else "，但无法确定具体协议"),
                 "P:" + (predicted ?: "hv"),
             )
             else -> mk(Status.UNKNOWN, "没有足够证据识别协议", "")
