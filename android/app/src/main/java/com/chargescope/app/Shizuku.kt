@@ -5,9 +5,12 @@ import android.content.Context
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 
 /** Optional Shizuku channel (adb-shell privileges). Read-only: reads sysfs + dumpsys battery. */
@@ -20,34 +23,79 @@ object ShizukuBridge {
         READY("Shizuku 已就绪"),
     }
 
-    fun state(): State = try {
-        when {
-            !Shizuku.pingBinder() || Shizuku.isPreV11() -> State.NOT_RUNNING
-            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> State.READY
-            else -> State.NO_PERMISSION
+    private val _state = MutableStateFlow(State.NOT_RUNNING)
+    val stateFlow = _state.asStateFlow()
+
+    @Volatile private var listenersAdded = false
+    @Volatile private var svc: IShellService? = null
+    @Volatile private var pendingBind: CompletableDeferred<IShellService?>? = null
+
+    private val permListener = Shizuku.OnRequestPermissionResultListener { _, _ ->
+        refreshState()
+    }
+    private val receivedListener = Shizuku.OnBinderReceivedListener {
+        refreshState()
+    }
+    private val deadListener = Shizuku.OnBinderDeadListener {
+        svc = null
+        pendingBind?.complete(null)
+        pendingBind = null
+        _state.value = State.NOT_RUNNING
+    }
+
+    private fun ensureListeners() {
+        if (listenersAdded) return
+        synchronized(this) {
+            if (listenersAdded) return
+            try {
+                Shizuku.addRequestPermissionResultListener(permListener)
+                Shizuku.addBinderReceivedListenerSticky(receivedListener)
+                Shizuku.addBinderDeadListener(deadListener)
+                listenersAdded = true
+            } catch (_: Throwable) {
+            }
         }
-    } catch (_: Throwable) {
-        State.NOT_RUNNING
+    }
+
+    fun state(): State {
+        ensureListeners()
+        return try {
+            when {
+                !Shizuku.pingBinder() || Shizuku.isPreV11() -> State.NOT_RUNNING
+                Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> State.READY
+                else -> State.NO_PERMISSION
+            }
+        } catch (_: Throwable) {
+            State.NOT_RUNNING
+        }
+    }
+
+    fun refreshState(): State {
+        val s = state()
+        _state.value = s
+        return s
     }
 
     fun requestPermission() {
+        ensureListeners()
         try {
             Shizuku.requestPermission(REQ)
         } catch (_: Throwable) {
         }
     }
 
-    @Volatile private var svc: IShellService? = null
-    @Volatile private var binding = false
-
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-            svc = IShellService.Stub.asInterface(binder)
+            val iface = IShellService.Stub.asInterface(binder)
+            svc = iface
+            pendingBind?.complete(iface)
+            pendingBind = null
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
             svc = null
-            binding = false
+            pendingBind?.complete(null)
+            pendingBind = null
         }
     }
 
@@ -58,39 +106,42 @@ object ShizukuBridge {
             .daemon(false)
             .version(1)
 
-    private suspend fun ensureBound(ctx: Context) {
-        if (svc?.asBinder()?.isBinderAlive == true) return
-        if (!binding) {
-            binding = true
-            Shizuku.bindUserService(args(ctx), conn)
+    private suspend fun ensureBound(ctx: Context): IShellService? {
+        svc?.takeIf { it.asBinder().isBinderAlive }?.let { return it }
+        val deferred = synchronized(this) {
+            svc?.takeIf { it.asBinder().isBinderAlive }?.let { return it }
+            pendingBind ?: CompletableDeferred<IShellService?>().also {
+                pendingBind = it
+                Shizuku.bindUserService(args(ctx), conn)
+            }
         }
-        repeat(50) {
-            if (svc != null) return
-            delay(100)
+        val bound = withTimeoutOrNull(5000L) { deferred.await() }
+        if (bound == null) {
+            synchronized(this) { if (pendingBind === deferred) pendingBind = null }
         }
-        binding = false
+        return bound
     }
 
     /** Releases the Shizuku user service process when Shizuku mode is disabled. */
     fun unbind(ctx: Context) {
         val current = svc
         svc = null
-        binding = false
+        pendingBind?.complete(null)
+        pendingBind = null
         if (current != null) {
             try { Shizuku.unbindUserService(args(ctx.applicationContext), conn, true) } catch (_: Throwable) {}
         }
     }
 
     suspend fun scan(ctx: Context): RootScanner.Result = withContext(Dispatchers.IO) {
-        val st = state()
+        val st = refreshState()
         if (st != State.READY) return@withContext RootScanner.Result(emptyList(), st.label)
         try {
-            ensureBound(ctx.applicationContext)
-            val s = svc ?: return@withContext RootScanner.Result(emptyList(), "Shizuku 服务连接超时")
+            val s = ensureBound(ctx.applicationContext)
+                ?: return@withContext RootScanner.Result(emptyList(), "Shizuku 服务连接超时")
             RootScanner.interpret(s.run(""), setOf("2000", "0"))
         } catch (e: Throwable) {
             svc = null
-            binding = false
             RootScanner.Result(emptyList(), "Shizuku 调用失败：" + (e.message ?: e.javaClass.simpleName))
         }
     }

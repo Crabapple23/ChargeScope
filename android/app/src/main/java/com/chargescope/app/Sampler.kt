@@ -210,6 +210,49 @@ object Sampler {
         if (text != null) AppLog.i("提示：$text")
     }
 
+    /** Called immediately when the user switches privileged mode so UI state updates without waiting. */
+    fun onPrivModeChanged(ctx: Context, mode: Int) {
+        val app = ctx.applicationContext
+        Prefs.setPrivMode(app, mode)
+        privFails = 0
+        privRetryAt = 0L
+        tick = 0
+        privError = null
+        lastLoggedError = null
+        if (mode != 1) RootScanner.close()
+        if (mode != 2) ShizukuBridge.unbind(app)
+        if (mode == 0) {
+            lastMode = 0
+            lastNodes = emptyList()
+            privGranted = false
+        }
+        _state.value = _state.value.copy(rootError = null)
+    }
+
+    /** Explicit user-triggered probe: clears backoff and immediately updates Sampler state. */
+    suspend fun probePrivileged(ctx: Context, mode: Int): RootScanner.Result {
+        val app = ctx.applicationContext
+        privFails = 0
+        privRetryAt = 0L
+        tick = 0
+        val r = if (mode == 1) RootScanner.scan(20) else ShizukuBridge.scan(app)
+        if (r.error == null) {
+            lastMode = mode
+            privGranted = true
+            privFails = 0
+            privRetryAt = 0L
+            lastNodes = r.nodes
+            privError = null
+            lastLoggedError = null
+            _state.value = _state.value.copy(rootError = null)
+            sample(app)
+        } else {
+            privError = r.error
+            _state.value = _state.value.copy(rootError = r.error)
+        }
+        return r
+    }
+
     private suspend fun refreshPrivileged(app: Context) {
         val mode = Prefs.privMode(app)
         if (mode != lastMode) {
@@ -225,7 +268,8 @@ object Sampler {
         val now = SystemClock.elapsedRealtime()
         // Back off after a failure so a denied/slow channel never spams the manager's prompt.
         if (now < privRetryAt || tick++ % PRIV_EVERY != 0) return
-        val r = if (mode == 1) RootScanner.scan(if (privGranted) 4 else 15) else ShizukuBridge.scan(app)
+        // Keep background polling timeout short (4s) so it never stalls manual probes.
+        val r = if (mode == 1) RootScanner.scan(4) else ShizukuBridge.scan(app)
         if (r.error == null) {
             privGranted = true; privFails = 0
             lastNodes = r.nodes; privError = null
