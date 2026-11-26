@@ -589,12 +589,22 @@ private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("${AppLog.time(e.wallMs)}  ·  ${e.status}", style = MaterialTheme.typography.titleSmall)
+                    if (e.note.isNotEmpty()) {
+                        Text(
+                            e.note,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            "${AppLog.time(e.wallMs)}  ·  ${e.status}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Text("${AppLog.time(e.wallMs)}  ·  ${e.status}", style = MaterialTheme.typography.titleSmall)
+                    }
                     if (!expanded) {
                         Text(e.headline, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (e.note.isNotEmpty()) {
-                            Text(tr("备注：${e.note}", "Note: ${e.note}"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                        }
                     }
                 }
                 if (collapsible) Text("▸", Modifier.graphicsLayer { rotationZ = arrowAngle.value })
@@ -612,9 +622,6 @@ private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(e.headline)
-                    if (e.note.isNotEmpty()) {
-                        Text(tr("备注：${e.note}", "Note: ${e.note}"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                    }
                     KV(tr("设备", "Device"), e.device)
                     KV(tr("电量", "Level"), e.levelPct?.let { "$it %" })
                     KV(tr("输入电压峰值", "Peak Input Voltage"), fmt(e.maxVinV, "V", 1))
@@ -646,32 +653,65 @@ private fun ArchiveTab() {
     var confirm by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<ArchiveEntry?>(null) }
     var draft by remember { mutableStateOf("") }
+    var confirmDeleteOne by remember { mutableStateOf(false) }
     val collapsible = items.size > 1
     val archivedToast = tr("已增加当前状态为存档", "Saved current state to archive")
     val noDataToast = tr("暂无采样数据，无法存档", "No sample yet")
+    val deletedToast = tr("已删除该条存档", "Archive entry deleted")
 
     editing?.let { target ->
         AlertDialog(
-            onDismissRequest = { editing = null },
-            title = { Text(tr("存档备注", "Archive Note")) },
+            onDismissRequest = {
+                editing = null
+                confirmDeleteOne = false
+            },
+            title = { Text(tr("管理存档", "Manage Archive")) },
             text = {
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    placeholder = { Text(tr("例如：原装 120W 头 + 6A 线", "e.g., OEM 120W brick + 6A cable")) },
-                    singleLine = false,
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        label = { Text(tr("备注（优先显示）", "Note (shown first)")) },
+                        placeholder = { Text(tr("例如：原装 120W 头 + 6A 线", "e.g., OEM 120W brick + 6A cable")) },
+                        singleLine = false,
+                        maxLines = 4,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            if (confirmDeleteOne) {
+                                if (Archive.delete(target.wallMs)) {
+                                    AppLog.i("已删除一条识别存档")
+                                    Toast.makeText(ctx, deletedToast, Toast.LENGTH_SHORT).show()
+                                }
+                                editing = null
+                                confirmDeleteOne = false
+                            } else {
+                                confirmDeleteOne = true
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (confirmDeleteOne) tr("再次点击确认删除此存档", "Tap again to confirm delete")
+                            else tr("删除此存档", "Delete This Entry"),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
                     Archive.updateNote(target.wallMs, draft)
                     editing = null
+                    confirmDeleteOne = false
                 }) { Text(tr("保存", "Save")) }
             },
             dismissButton = {
-                TextButton(onClick = { editing = null }) { Text(tr("取消", "Cancel")) }
+                TextButton(onClick = {
+                    editing = null
+                    confirmDeleteOne = false
+                }) { Text(tr("取消", "Cancel")) }
             },
         )
     }
@@ -685,8 +725,8 @@ private fun ArchiveTab() {
             Section(tr("协议识别存档（${items.size} 条，仅保存在本机）", "Protocol Archive (${items.size}, local only)")) {
                 Text(
                     tr(
-                        "当出现“已确认 / 可能 / 证据冲突”的识别结果时自动存档；同一次充电内结果变化会新增一条，拔出充电器时写入峰值。长按任意存档可添加或修改备注。",
-                        "Auto-saved on Confirmed / Likely / Conflicting results; updates peaks on unplug. Long-press any entry to edit its note.",
+                        "当出现“已确认 / 可能 / 证据冲突”的识别结果时自动存档；同一次充电内结果变化会新增一条，拔出充电器时写入峰值。长按任意存档可编辑备注或删除。",
+                        "Auto-saved on Confirmed / Likely / Conflicting results; updates peaks on unplug. Long-press any entry to edit note or delete.",
                     ),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -715,6 +755,7 @@ private fun ArchiveTab() {
                     onLongPress = {
                         editing = e
                         draft = e.note
+                        confirmDeleteOne = false
                     },
                 )
             }

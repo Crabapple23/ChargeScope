@@ -116,6 +116,20 @@ object Archive {
     }
 
     @Synchronized
+    fun delete(wallMs: Long): Boolean {
+        val cur = _items.value.toMutableList()
+        val removed = cur.removeAll { it.wallMs == wallMs }
+        if (!removed) return false
+        _items.value = cur
+        if (cur.isEmpty()) {
+            try { file?.delete() } catch (_: Exception) {}
+        } else {
+            rewrite()
+        }
+        return true
+    }
+
+    @Synchronized
     fun sizeBytes(): Long = try { file?.takeIf { it.exists() }?.length() ?: 0L } catch (_: Exception) { 0L }
 
     @Synchronized
