@@ -787,12 +787,13 @@ private fun DataTab() {
         Text(tr("已记录 $recordedRows 行，本机总占用约 ${fmtBytes(diskBytes)}（CSV 采用 GZIP 压缩存储，导出时自动解压）。应用无联网权限，导出不含设备标识。", "$recordedRows rows recorded, ~${fmtBytes(diskBytes)} on disk (GZIP compressed, auto-decompressed on export). Offline only."))
         Button(onClick = { exportCsv.launch("chargescope.csv") }, modifier = Modifier.fillMaxWidth()) { Text(tr("导出 CSV 记录", "Export CSV")) }
         Button(onClick = { exportLog.launch("chargescope-log.txt") }, modifier = Modifier.fillMaxWidth()) { Text(tr("导出诊断日志", "Export Diagnostic Log")) }
+        val clearedMsg = tr("已清除记录和日志", "Records and logs cleared")
         OutlinedButton(
             onClick = {
                 if (confirmClear) {
                     Recorder.clear(ctx); AppLog.clear()
                     diskBytes = Archive.sizeBytes()
-                    msg = tr("已清除记录和日志", "Records and logs cleared"); confirmClear = false
+                    msg = clearedMsg; confirmClear = false
                 } else confirmClear = true
             },
             modifier = Modifier.fillMaxWidth(),
