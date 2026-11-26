@@ -9,6 +9,8 @@ android/app/build/
 android/build/
 android/.idea/
 *.iml
+*.jks
+*.keystore
 
 # Generated UniFFI output (rebuild via scripts/build-rust.*)
 android/app/src/main/jniLibs/

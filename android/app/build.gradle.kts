@@ -12,9 +12,21 @@ android {
         applicationId = "com.chargescope.hanhan.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.4.0"
+        versionCode = 2
+        versionName = "1.0.0"
         resourceConfigurations += listOf("zh", "en")
+    }
+
+    signingConfigs {
+        val ksPath = System.getenv("KEYSTORE_FILE")
+        if (!ksPath.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -25,6 +37,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 
