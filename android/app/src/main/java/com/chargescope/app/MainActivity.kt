@@ -475,9 +475,9 @@ private fun DataTab() {
 
     var mode by remember(rootError) { mutableStateOf(Prefs.privMode(ctx).toLong()) }
     val shz by ShizukuBridge.stateFlow.collectAsState()
+    val checking by Sampler.probing.collectAsState()
+    val privMsg by Sampler.probeMsg.collectAsState()
     var rootProvider by remember { mutableStateOf<RootScanner.Provider?>(null) }
-    var checking by remember { mutableStateOf(false) }
-    var privMsg by remember { mutableStateOf<String?>(null) }
     var interval by remember { mutableStateOf(Prefs.intervalMs(ctx)) }
     var auto by remember { mutableStateOf(Prefs.autoRecord(ctx)) }
     var maxTemp by remember { mutableStateOf(Prefs.long(ctx, Prefs.TEMP, 45L)) }
@@ -559,28 +559,14 @@ private fun DataTab() {
     ) {
         Chips(PRIV_OPTS, mode) {
             mode = it
-            privMsg = null
             Sampler.onPrivModeChanged(ctx, it.toInt())
-            if (it == 2L) scope.launch(Dispatchers.IO) { ShizukuBridge.refreshState() }
-            if (it != 0L) scope.launch { Sampler.sample(ctx) }
         }
         if (mode == 1L) {
             Text("Root 管理器：" + (rootProvider?.label ?: "未检测到 Magisk / KernelSU / APatch"))
             Text("兼容 Magisk、KernelSU、APatch：复用单个持久 su 会话，减少反复授权与进程开销。", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(
                 enabled = !checking,
-                onClick = {
-                    checking = true
-                    privMsg = "正在检测…（如弹出 Root 授权请点允许）"
-                    scope.launch {
-                        try {
-                            val r = Sampler.probePrivileged(ctx, 1)
-                            privMsg = if (r.error == null) "Root 可用，读到 ${r.nodes.size} 个节点" else r.error
-                        } finally {
-                            checking = false
-                        }
-                    }
-                },
+                onClick = { Sampler.startProbe(ctx, 1) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(if (checking) "正在检测…" else "检测 Root 授权") }
         }
@@ -589,25 +575,11 @@ private fun DataTab() {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     enabled = !checking,
-                    onClick = {
-                        privMsg = null
-                        ShizukuBridge.requestPermission()
-                    },
+                    onClick = { ShizukuBridge.requestPermission() },
                 ) { Text("申请授权") }
                 OutlinedButton(
                     enabled = !checking,
-                    onClick = {
-                        checking = true
-                        privMsg = "正在检测 Shizuku…"
-                        scope.launch {
-                            try {
-                                val r = Sampler.probePrivileged(ctx, 2)
-                                privMsg = if (r.error == null) "Shizuku 可用，读到 ${r.nodes.size} 个节点" else r.error
-                            } finally {
-                                checking = false
-                            }
-                        }
-                    },
+                    onClick = { Sampler.startProbe(ctx, 2) },
                 ) { Text(if (checking) "检测中…" else "检测") }
             }
             Text(

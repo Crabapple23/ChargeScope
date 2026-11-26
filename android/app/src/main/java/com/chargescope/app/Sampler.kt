@@ -3,9 +3,12 @@ package com.chargescope.app
 import android.content.Context
 import android.os.Build
 import android.os.SystemClock
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -167,6 +170,7 @@ object Sampler {
     private const val PRIV_EVERY = 3
 
     private val mutex = Mutex()
+    private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val ring = ArrayDeque<Snapshot>(WINDOW + 1)
     private val batSeries = FloatArray(SERIES)
     private val inSeries = FloatArray(SERIES)
@@ -195,6 +199,12 @@ object Sampler {
     private val _state = MutableStateFlow(UiState())
     val state = _state.asStateFlow()
 
+    private val _probing = MutableStateFlow(false)
+    val probing = _probing.asStateFlow()
+
+    private val _probeMsg = MutableStateFlow<String?>(null)
+    val probeMsg = _probeMsg.asStateFlow()
+
     fun setRecording(on: Boolean) {
         recording = on
         _state.value = _state.value.copy(
@@ -210,47 +220,67 @@ object Sampler {
         if (text != null) AppLog.i("提示：$text")
     }
 
-    /** Called immediately when the user switches privileged mode so UI state updates without waiting. */
+    /** Called immediately when the user switches privileged mode; runs on Sampler's own scope. */
     fun onPrivModeChanged(ctx: Context, mode: Int) {
         val app = ctx.applicationContext
         Prefs.setPrivMode(app, mode)
-        privFails = 0
-        privRetryAt = 0L
-        tick = 0
-        privError = null
-        lastLoggedError = null
-        if (mode != 1) RootScanner.close()
-        if (mode != 2) ShizukuBridge.unbind(app)
-        if (mode == 0) {
-            lastMode = 0
-            lastNodes = emptyList()
-            privGranted = false
-        }
+        _probeMsg.value = null
         _state.value = _state.value.copy(rootError = null)
+        bgScope.launch {
+            mutex.withLock {
+                privFails = 0
+                privRetryAt = 0L
+                tick = 0
+                privError = null
+                lastLoggedError = null
+                if (mode != 1) RootScanner.close()
+                if (mode != 2) ShizukuBridge.unbind(app)
+                if (mode == 0) {
+                    lastMode = 0
+                    lastNodes = emptyList()
+                    privGranted = false
+                }
+            }
+            if (mode == 2) ShizukuBridge.refreshState()
+            if (mode != 0) sample(app)
+        }
     }
 
-    /** Explicit user-triggered probe: clears backoff and immediately updates Sampler state. */
-    suspend fun probePrivileged(ctx: Context, mode: Int): RootScanner.Result {
+    /** Explicit user-triggered probe: runs on Sampler's scope under mutex so tab switches never cancel it. */
+    fun startProbe(ctx: Context, mode: Int) {
+        if (_probing.value) return
         val app = ctx.applicationContext
-        privFails = 0
-        privRetryAt = 0L
-        tick = 0
-        val r = if (mode == 1) RootScanner.scan(20) else ShizukuBridge.scan(app)
-        if (r.error == null) {
-            lastMode = mode
-            privGranted = true
-            privFails = 0
-            privRetryAt = 0L
-            lastNodes = r.nodes
-            privError = null
-            lastLoggedError = null
-            _state.value = _state.value.copy(rootError = null)
-            sample(app)
-        } else {
-            privError = r.error
-            _state.value = _state.value.copy(rootError = r.error)
+        _probing.value = true
+        _probeMsg.value = if (mode == 1) "正在检测…（如弹出 Root 授权请点允许）" else "正在检测 Shizuku…"
+        bgScope.launch {
+            try {
+                mutex.withLock {
+                    AppLog.init(app)
+                    Archive.init(app)
+                    privFails = 0
+                    privRetryAt = 0L
+                    tick = 0
+                    val r = if (mode == 1) RootScanner.scan(20) else ShizukuBridge.scan(app)
+                    if (r.error == null) {
+                        lastMode = mode
+                        privGranted = true
+                        privFails = 0
+                        privRetryAt = 0L
+                        lastNodes = r.nodes
+                        privError = null
+                        lastLoggedError = null
+                        _probeMsg.value = (if (mode == 1) "Root" else "Shizuku") + " 可用，读到 ${r.nodes.size} 个节点"
+                        sampleLocked(app)
+                    } else {
+                        privError = r.error
+                        _probeMsg.value = r.error
+                        _state.value = _state.value.copy(rootError = r.error)
+                    }
+                }
+            } finally {
+                _probing.value = false
+            }
         }
-        return r
     }
 
     private suspend fun refreshPrivileged(app: Context) {
@@ -268,8 +298,8 @@ object Sampler {
         val now = SystemClock.elapsedRealtime()
         // Back off after a failure so a denied/slow channel never spams the manager's prompt.
         if (now < privRetryAt || tick++ % PRIV_EVERY != 0) return
-        // Keep background polling timeout short (4s) so it never stalls manual probes.
-        val r = if (mode == 1) RootScanner.scan(4) else ShizukuBridge.scan(app)
+        // Give first-time ungranted Root a 10s prompt window; granted scans stay at 4s.
+        val r = if (mode == 1) RootScanner.scan(if (privGranted) 4 else 10) else ShizukuBridge.scan(app)
         if (r.error == null) {
             privGranted = true; privFails = 0
             lastNodes = r.nodes; privError = null
@@ -373,39 +403,41 @@ object Sampler {
         AppLog.init(app)
         Archive.init(app)
         refreshPrivileged(app)
-        withContext(Dispatchers.Default) {
-            val s = Collector.battery(app).copy(rootNodes = lastNodes)
-            ring.addLast(s)
-            if (ring.size > WINDOW) ring.removeFirst()
-            // Drop bulky sysfs maps from snapshots older than the analysis window (60 samples).
-            val stripIdx = ring.size - KEEP_NODES - 1
-            if (stripIdx >= 0 && ring[stripIdx].rootNodes.isNotEmpty()) {
-                ring[stripIdx] = ring[stripIdx].copy(rootNodes = emptyList())
-            }
+        sampleLocked(app)
+    }
 
-            val inp = Analyzer.input(s)
-            val powerMw = Analyzer.powerMw(s)
-            val batW = powerMw?.div(1000.0)
-            val inW = Analyzer.inputPowerW(inp)
-            val batF = batW?.toFloat() ?: Float.NaN
-            val inF = inW?.toFloat() ?: Float.NaN
-            val series = pushSeries(batF, inF, s.elapsedMs)
-
-            val analysis = Analyzer.analyze(ring, Build.MANUFACTURER)
-            trackArchive(s, analysis, inp, batF)
-            if (recording) Recorder.append(app, s, powerMw, inp)
-            _state.value = UiState(
-                latest = s,
-                batteryPowerW = batW,
-                inputPowerW = inW,
-                series = series,
-                analysis = analysis,
-                metrics = Analyzer.metrics(ring),
-                recording = recording,
-                recordedRows = Recorder.rows,
-                rootError = privError,
-                notice = _state.value.notice,
-            )
+    private suspend fun sampleLocked(app: Context) = withContext(Dispatchers.Default) {
+        val s = Collector.battery(app).copy(rootNodes = lastNodes)
+        ring.addLast(s)
+        if (ring.size > WINDOW) ring.removeFirst()
+        // Drop bulky sysfs maps from snapshots older than the analysis window (60 samples).
+        val stripIdx = ring.size - KEEP_NODES - 1
+        if (stripIdx >= 0 && ring[stripIdx].rootNodes.isNotEmpty()) {
+            ring[stripIdx] = ring[stripIdx].copy(rootNodes = emptyList())
         }
+
+        val inp = Analyzer.input(s)
+        val powerMw = Analyzer.powerMw(s)
+        val batW = powerMw?.div(1000.0)
+        val inW = Analyzer.inputPowerW(inp)
+        val batF = batW?.toFloat() ?: Float.NaN
+        val inF = inW?.toFloat() ?: Float.NaN
+        val series = pushSeries(batF, inF, s.elapsedMs)
+
+        val analysis = Analyzer.analyze(ring, Build.MANUFACTURER)
+        trackArchive(s, analysis, inp, batF)
+        if (recording) Recorder.append(app, s, powerMw, inp)
+        _state.value = UiState(
+            latest = s,
+            batteryPowerW = batW,
+            inputPowerW = inW,
+            series = series,
+            analysis = analysis,
+            metrics = Analyzer.metrics(ring),
+            recording = recording,
+            recordedRows = Recorder.rows,
+            rootError = privError,
+            notice = _state.value.notice,
+        )
     }
 }
