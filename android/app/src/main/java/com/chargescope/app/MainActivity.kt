@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
@@ -157,6 +159,7 @@ private fun App() {
     var showSettings by remember { mutableStateOf(false) }
     var backProgress by remember { mutableFloatStateOf(0f) }
     var backEdge by remember { mutableIntStateOf(0) }
+    var lastProtocolTapMs by remember { mutableLongStateOf(0L) }
 
     val dark = when (prefs.themeMode) {
         1 -> false
@@ -225,9 +228,25 @@ private fun App() {
                         NavigationBar {
                             TABS.forEachIndexed { i, t ->
                                 val label = tr(t.zh, t.en)
+                                val archivedToast = tr("已存档当前协议状态", "Current protocol archived")
+                                val noDataToast = tr("暂无采样数据，无法存档", "No sample yet")
                                 NavigationBarItem(
                                     selected = tab == i,
-                                    onClick = { tab = i },
+                                    onClick = {
+                                        if (i == 1) {
+                                            val now = SystemClock.elapsedRealtime()
+                                            if (now - lastProtocolTapMs <= 400L) {
+                                                lastProtocolTapMs = 0L
+                                                val ok = Sampler.archiveNow(ctx)
+                                                Toast.makeText(ctx, if (ok) archivedToast else noDataToast, Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                lastProtocolTapMs = now
+                                            }
+                                        } else {
+                                            lastProtocolTapMs = 0L
+                                        }
+                                        tab = i
+                                    },
                                     icon = {
                                         Icon(
                                             painter = painterResource(t.icon),
@@ -579,12 +598,15 @@ private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -
 
 @Composable
 private fun ArchiveTab() {
+    val ctx = LocalContext.current
     val items by Archive.items.collectAsState()
     val reversed = remember(items) { items.asReversed() }
     var confirm by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<ArchiveEntry?>(null) }
     var draft by remember { mutableStateOf("") }
     val collapsible = items.size > 1
+    val archivedToast = tr("已增加当前状态为存档", "Saved current state to archive")
+    val noDataToast = tr("暂无采样数据，无法存档", "No sample yet")
 
     editing?.let { target ->
         AlertDialog(
@@ -628,7 +650,14 @@ private fun ArchiveTab() {
                         if (confirm) { Archive.clear(); AppLog.i("已清除识别存档"); confirm = false } else confirm = true
                     },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (confirm) "再次点击确认清除全部存档" else "清除存档") }
+                ) { Text(if (confirm) tr("再次点击确认清除全部存档", "Tap again to clear all") else tr("清除存档", "Clear Archive")) }
+                Button(
+                    onClick = {
+                        val ok = Sampler.archiveNow(ctx)
+                        Toast.makeText(ctx, if (ok) archivedToast else noDataToast, Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(tr("增加当前为存档", "Save Current as Archive")) }
             }
         }
         if (reversed.isEmpty()) {

@@ -447,6 +447,39 @@ object Sampler {
         wasPlugged = s.isPlugged
     }
 
+    /** Manually snapshots the current state into the archive (returns false if no sample yet). */
+    fun archiveNow(ctx: Context): Boolean {
+        val app = ctx.applicationContext
+        AppLog.init(app)
+        Archive.init(app)
+        val ui = _state.value
+        val s = ui.latest ?: return false
+        val analysis = ui.analysis ?: return false
+        val inp = Analyzer.input(s)
+        val curVin = inp.voltageUv?.let { it / 1e6 }
+        val specParts = ArrayList<String>(4)
+        analysis.protocolSpec?.let { specParts += "已确认协议：$it" }
+        specParts.addAll(analysis.candidateSpecs)
+        val e = ArchiveEntry(
+            wallMs = System.currentTimeMillis(),
+            status = analysis.status.label,
+            headline = analysis.headline,
+            key = analysis.key.ifEmpty { "M:${analysis.status.name}" },
+            evidence = analysis.evidence.sortedByDescending { it.level }.map { "L${it.level} ${it.text}" },
+            candidates = analysis.candidates,
+            maxVinV = peakVin ?: curVin,
+            maxInputW = peakInW ?: ui.inputPowerW,
+            maxBatteryW = peakBatW ?: ui.batteryPowerW,
+            levelPct = s.levelPct,
+            device = "${Build.MANUFACTURER} ${Build.MODEL}",
+            description = analysis.description,
+            specText = specParts.joinToString("\n"),
+        )
+        Archive.upsert(e)
+        AppLog.i("手动存档：[${e.status}] ${e.headline}")
+        return true
+    }
+
     /** Writes the final peaks of the running session into its archive entry. */
     private fun finishEntry() {
         archivedEntry?.let {
