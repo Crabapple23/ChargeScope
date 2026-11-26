@@ -50,10 +50,15 @@ object Analyzer {
         return if (v.isBlank() || v.contains(' ')) null else v
     }
 
+    /**
+     * Only charger-facing supplies count as input nodes. Nodes of type Unknown/Battery/BMS
+     * (fuel gauges, charge pumps, chargers) report battery-side values and must be ignored.
+     */
     private fun isInputNode(n: RootNode): Boolean {
         val t = n.props["type"]?.uppercase() ?: return false
-        if (t == "BATTERY" || t == "BMS") return false
-        return n.props["online"] != "0"
+        val inputType = t.startsWith("USB") || t == "MAINS" || t == "WIRELESS"
+        if (!inputType) return false
+        return n.props["online"] != "0" && n.props["present"] != "0"
     }
 
     fun input(s: Snapshot): InputInfo {
@@ -275,7 +280,13 @@ object Analyzer {
             }
         }
 
-        // L3: single pass over the last 60 snapshots without copying the window.
+        // DCP/CDP/SDP is the BC1.2 port-detection stage; fast protocols (PD, QC...) negotiate on top of it.
+        // When both are reported they are layers, not a conflict: keep the fast protocol only.
+        var basicDropped = false
+        if (l4.values.any { it.fast } && l4.values.any { !it.fast }) {
+            l4.values.removeAll { !it.fast }
+            basicDropped = true
+        }
         val start = (window.size - 60).coerceAtLeast(0)
         val span = window.size - start
         val vols = LongArray(span)
@@ -342,6 +353,12 @@ object Analyzer {
             limits += "未启用 Root / Shizuku 或无法读取 sysfs：只有电池侧数据，无法识别协议。"
         }
         if (volCount >= 2) limits += "电压步进判断受采样间隔和驱动上报精度影响，仅作参考。"
+        if (basicDropped) {
+            limits += "驱动同时报告了 DCP/CDP/SDP（BC1.2 充电口识别）和快充协议：前者是物理口类型，快充协议在其之上协商，二者不冲突，结论以快充协议为准。"
+        }
+        if (l4.values.any { it.fast } && lastInp.voltageUv == null && last.rootNodes.isNotEmpty()) {
+            limits += "该机型的输入侧节点没有提供有效的电压/电流读数（常见为 voltage_now=0），无法验证实际协商的电压档位。"
+        }
 
         val cl = candidates.toList()
         val driver = if (l4.isEmpty()) null else l4.values.joinToString(" / ") { it.label }
@@ -368,6 +385,9 @@ object Analyzer {
             }
         } else {
             desc.append("输入侧数据不足，暂时无法预测具体协议。")
+        }
+        if (advV != null && advI != null) {
+            desc.append("充电器宣告上限 %.1f V / %.2f A（约 %.0f W，上限值）。".format(advV / 1e6, advI / 1e6, advV.toDouble() * advI / 1e12))
         }
         if (batMw != null) {
             desc.append("当前电池侧估算功率约 %.1f W（仅参考，不能用来确认协议）。".format(batMw / 1000.0))

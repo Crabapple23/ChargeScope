@@ -66,6 +66,23 @@ class AnalyzerTest {
         assertEquals("9000000", n[0].props["max_charging_voltage"])
     }
 
+    @Test fun dcpPlusPdIsLayeredNotConflict() {
+        // Real Xiaomi/MT6991 log: BC1.2 type is DCP while real_type reports USB_PD.
+        val usb = RootNode("usb", mapOf("type" to "USB_DCP", "online" to "1", "present" to "1", "voltage_now" to "0", "real_type" to "USB_PD"))
+        val chg = RootNode("primary_chg", mapOf("type" to "USB_DCP", "online" to "5", "usb_type" to "Unknown SDP CDP [DCP]"))
+        val a = Analyzer.analyze(listOf(snap(listOf(usb, chg))))
+        assertEquals(Status.CONFIRMED, a.status)
+        assertEquals("USB PD", a.driver)
+    }
+
+    @Test fun gaugeAndChargerNodesAreNotInput() {
+        val gauge = RootNode("mt6379-gauge1", mapOf("type" to "Unknown", "online" to "1", "present" to "1", "voltage_now" to "4000000", "current_now" to "1800"))
+        val cp = RootNode("cp_master", mapOf("type" to "Mains", "present" to "0", "voltage_now" to "9000000"))
+        val inp = Analyzer.input(snap(listOf(gauge, cp)))
+        assertNull(inp.voltageUv)
+        assertNull(inp.currentUa)
+    }
+
     @Test fun parseRootOutput() {
         val nodes = RootScanner.parse("@@usb\ntype=USB\nonline=1\n@@battery\ncapacity=50\n")
         assertEquals(2, nodes.size)
