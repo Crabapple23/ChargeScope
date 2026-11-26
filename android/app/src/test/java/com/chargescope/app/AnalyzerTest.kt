@@ -137,7 +137,8 @@ class AnalyzerTest {
         val fullSnap = snap(listOf(usb)).copy(levelPct = 100)
         val a = Analyzer.analyze(listOf(fullSnap), "Xiaomi")
         assertTrue(a.limitations.any { "降流" in it })
-        assertTrue(a.candidates.none { "AFC" in it || "QC 2.0/3.0" in it })
+        assertTrue(a.evidence.none { "规格表" in it.text })
+        assertTrue(a.candidates.none { "三星 AFC" in it || "QC 2.0/3.0" in it })
     }
 
     @Test fun parseRootOutput() {
