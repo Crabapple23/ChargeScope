@@ -58,6 +58,7 @@ class ShellService : IShellService.Stub() {
             "voltage_max", "current_max", "usb_type", "real_type",
             "charge_type", "temp", "input_current_limit",
             "constant_charge_current", "charge_counter",
+            "charge_full", "charge_full_design", "soh", "cycle_count",
         )
     }
 }

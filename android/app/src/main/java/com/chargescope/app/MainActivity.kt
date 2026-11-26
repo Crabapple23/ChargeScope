@@ -289,7 +289,15 @@ private fun RealtimeTab() {
         KV(tr("电池侧功率（估算）", "Battery Power (Est.)"), fmt(ui.batteryPowerW, "W"))
         KV(tr("输入侧功率（需 Root/Shizuku）", "Input Power (Root/Shizuku)"), fmt(ui.inputPowerW, "W"))
         KV(tr("温度", "Temperature"), fmt(s?.tempDeci?.let { it / 10.0 }, "°C", 1))
-        KV(tr("健康", "Health"), healthText(s?.health))
+        val hText = healthText(s?.health)
+        val hPct = s?.let { Analyzer.batteryHealthPct(it) }
+        val healthDisplay = when {
+            hText != null && hPct != null -> "$hText ($hPct%)"
+            hText != null -> hText
+            hPct != null -> "$hPct%"
+            else -> null
+        }
+        KV(tr("健康", "Health"), healthDisplay)
     }
     Section(tr("功率曲线", "Power Chart")) {
         PowerChart(ui.series)
@@ -407,7 +415,7 @@ private fun ProtocolTab() {
     Section(tr("结论：${a.status.label}", "Conclusion: ${a.status.name}")) {
         Text(a.headline, style = MaterialTheme.typography.titleSmall)
         KV(tr("驱动报告协议", "Driver Protocol"), a.driver ?: tr("未报告", "None"))
-        KV(tr("预测协议", "Predicted Protocol"), a.predicted ?: tr("无法预测", "Unknown"))
+        KV(tr("预测当前协议", "Predicted Current Protocol"), a.predicted ?: tr("无法预测", "Unknown"))
         a.protocolSpec?.let { spec ->
             Text(tr("协议规格说明（参考上限，不代表当前实际功率）", "Protocol Spec (Reference ceiling, not live power)"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             Text(spec, style = MaterialTheme.typography.bodySmall)
@@ -582,8 +590,34 @@ private fun ArchiveTab() {
 
 @Composable
 private fun DeviceTab(onOpenSettings: () -> Unit) {
+    val ctx = LocalContext.current
     val ui by Sampler.state.collectAsState()
     val s = ui.latest
+    val screenInfo = remember(ctx) {
+        val dm = ctx.resources.displayMetrics
+        val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+        val (w, h) = if (Build.VERSION.SDK_INT >= 30) {
+            val b = wm.currentWindowMetrics.bounds
+            b.width() to b.height()
+        } else {
+            dm.widthPixels to dm.heightPixels
+        }
+        val hz = if (Build.VERSION.SDK_INT >= 30) {
+            try { ctx.display?.refreshRate } catch (_: Exception) { null }
+        } else {
+            @Suppress("DEPRECATION") wm.defaultDisplay?.refreshRate
+        }
+        "${w}×${h} · ${dm.densityDpi} dpi" + (hz?.let { " · %.0f Hz".format(it) } ?: "")
+    }
+    val kernelInfo = remember {
+        val ver = System.getProperty("os.version")
+        val abi = Build.SUPPORTED_ABIS.firstOrNull()
+        when {
+            !ver.isNullOrBlank() && abi != null -> "$ver ($abi)"
+            !ver.isNullOrBlank() -> ver
+            else -> null
+        }
+    }
     Row(
         Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -598,9 +632,12 @@ private fun DeviceTab(onOpenSettings: () -> Unit) {
         }
     }
     Section(tr("设备信息", "Device Info")) {
-        KV(tr("型号", "Model"), "${Build.MANUFACTURER} ${Build.MODEL}")
+        KV(tr("品牌", "Brand"), if (Build.BRAND.equals(Build.MANUFACTURER, true)) Build.BRAND else "${Build.BRAND} (${Build.MANUFACTURER})")
+        KV(tr("型号", "Model"), Build.MODEL)
         KV("Android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         KV("SoC", if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else null)
+        KV(tr("屏幕", "Display"), screenInfo)
+        KV(tr("内核", "Kernel"), kernelInfo)
     }
     Section(tr("特权通道读取的节点（只读）", "Privileged Nodes (Read-only)")) {
         val nodes = s?.rootNodes.orEmpty()
@@ -743,7 +780,7 @@ private fun DataTab() {
     }
     Fold(
         tr("安全阈值", "Safety Limits"),
-        "${maxTemp}°C · " + (if (maxMin > 0) tr("${maxMin}分", "${maxMin}m") else tr("不限时", "No limit")) + " · " + (if (stopSoc > 0) "${stopSoc}%" else tr("不限", "Any")) + " · ${maxMb}MB",
+        "${maxTemp}°C · " + (if (maxMin > 0) "${maxMin}min" else tr("不限时", "No limit")) + " · " + (if (stopSoc > 0) "${stopSoc}%" else tr("不限", "Any")) + " · ${maxMb}MB",
     ) {
         Text(
             tr("达到以下任一上限时自动停止记录（仅停止采样，不影响手机充电）：", "Auto-stops recording when any limit is reached (never controls charging):"),

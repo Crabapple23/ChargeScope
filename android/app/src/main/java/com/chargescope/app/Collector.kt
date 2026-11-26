@@ -68,7 +68,7 @@ object RootScanner {
     private const val FIELDS =
         "type status online present capacity voltage_now current_now current_avg power_now " +
             "voltage_max current_max usb_type real_type charge_type temp input_current_limit " +
-            "constant_charge_current charge_counter"
+            "constant_charge_current charge_counter charge_full charge_full_design soh cycle_count"
 
     // No `sed` subprocess: `dumpsys battery` is parsed directly in Kotlin.
     private val SCRIPT = "echo \"#uid=\$(id -u)\"; " +

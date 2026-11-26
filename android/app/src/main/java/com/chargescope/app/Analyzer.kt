@@ -102,6 +102,24 @@ object Analyzer {
         return v * i / 1000.0
     }
 
+    /** Battery health percentage from sysfs `soh` or `charge_full / charge_full_design` (null if unavailable). */
+    fun batteryHealthPct(s: Snapshot): Int? {
+        var full: Long? = null
+        var design: Long? = null
+        for (n in s.rootNodes) {
+            val t = n.props["type"]?.uppercase()
+            if (t != "BATTERY" && n.name != "battery" && n.name != "bms") continue
+            n.props["soh"]?.trim()?.toIntOrNull()?.takeIf { it in 1..100 }?.let { return it }
+            if (full == null) full = n.props["charge_full"]?.trim()?.toLongOrNull()?.takeIf { it > 0 }
+            if (design == null) design = n.props["charge_full_design"]?.trim()?.toLongOrNull()?.takeIf { it > 0 }
+        }
+        if (full != null && design != null) {
+            val pct = (full * 100.0 / design).roundToLong().toInt()
+            if (pct in 10..120) return pct.coerceAtMost(100)
+        }
+        return null
+    }
+
     // ---- Spec table (from the protocol reference document) -------------------------------
 
     private data class Profile(val brand: String, val name: String, val v: Double, val a: Double)
