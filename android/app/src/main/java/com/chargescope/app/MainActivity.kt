@@ -10,9 +10,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,10 +23,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -37,9 +40,11 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -57,6 +62,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,8 +71,11 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        AppLog.init(this)
-        Archive.init(this)
+        // Initialize disk-backed stores off the main thread.
+        lifecycleScope.launch(Dispatchers.IO) {
+            AppLog.init(applicationContext)
+            Archive.init(applicationContext)
+        }
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -84,14 +94,20 @@ class MainActivity : ComponentActivity() {
         }
         setContent { App() }
     }
+
+    override fun onDestroy() {
+        if (!Sampler.state.value.recording) RootScanner.close()
+        super.onDestroy()
+    }
 }
 
 private val TABS = listOf("实时", "协议", "存档", "设备", "数据")
+private val GRID_FRACTIONS = floatArrayOf(0f, 0.5f, 1f)
+private val NICE_STEPS = floatArrayOf(5f, 10f, 20f, 30f, 50f, 70f, 100f, 150f, 200f, 300f)
 
 @Composable
 private fun App() {
     var tab by remember { mutableIntStateOf(0) }
-    val ui by Sampler.state.collectAsState()
     MaterialTheme(colorScheme = darkColorScheme()) {
         Scaffold(
             bottomBar = {
@@ -107,20 +123,26 @@ private fun App() {
                 }
             },
         ) { pad ->
-            Column(
-                Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+            // Each tab collects only the state it needs, avoiding root-level recompositions every 2s.
+            Box(Modifier.padding(pad).fillMaxSize()) {
                 when (tab) {
-                    0 -> RealtimeTab(ui)
-                    1 -> ProtocolTab(ui)
+                    0 -> ScrollBody { RealtimeTab() }
+                    1 -> ScrollBody { ProtocolTab() }
                     2 -> ArchiveTab()
-                    3 -> DeviceTab(ui)
-                    else -> DataTab(ui)
+                    3 -> ScrollBody { DeviceTab() }
+                    else -> ScrollBody { DataTab() }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun ScrollBody(content: @Composable () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) { content() }
 }
 
 @Composable
@@ -144,6 +166,12 @@ private fun KV(k: String, v: String?) {
 private fun fmt(v: Double?, unit: String, digits: Int = 2): String? =
     v?.let { String.format("%.${digits}f %s", it, unit) }
 
+private fun fmtBytes(b: Long): String = when {
+    b < 1024L -> "$b B"
+    b < 1024L * 1024L -> "%.1f KB".format(b / 1024.0)
+    else -> "%.2f MB".format(b / (1024.0 * 1024.0))
+}
+
 private fun statusText(s: Int?) = when (s) {
     2 -> "充电中"; 3 -> "放电中"; 4 -> "未充电"; 5 -> "已充满"; else -> null
 }
@@ -159,19 +187,18 @@ private fun healthText(h: Int?) = when (h) {
 // ---------------------------------------------------------------- realtime
 
 @Composable
-private fun RealtimeTab(ui: UiState) {
+private fun RealtimeTab() {
+    val ui by Sampler.state.collectAsState()
     val ctx = LocalContext.current
     val s = ui.latest
-    val powerW = s?.let { Analyzer.powerMw(it) }?.div(1000.0)
-    val inW = s?.let { Analyzer.inputPowerW(Analyzer.input(it)) }
     Section("电池（公开 API）") {
         KV("电量", s?.levelPct?.let { "$it %" })
         KV("状态", statusText(s?.status))
         KV("连接方式", s?.let { pluggedText(it.plugged) })
         KV("电池端电压", fmt(s?.voltageMv?.let { it / 1000.0 }, "V"))
         KV("电池电流（绝对值）", fmt(s?.let { Analyzer.currentMa(it) }, "mA", 0))
-        KV("电池侧功率（估算）", fmt(powerW, "W"))
-        KV("输入侧功率（需 Root/Shizuku）", fmt(inW, "W"))
+        KV("电池侧功率（估算）", fmt(ui.batteryPowerW, "W"))
+        KV("输入侧功率（需 Root/Shizuku）", fmt(ui.inputPowerW, "W"))
         KV("温度", fmt(s?.tempDeci?.let { it / 10.0 }, "°C", 1))
         KV("健康", healthText(s?.health))
     }
@@ -196,8 +223,7 @@ private fun RealtimeTab(ui: UiState) {
 }
 
 private fun niceMax(v: Float): Float {
-    val steps = floatArrayOf(5f, 10f, 20f, 30f, 50f, 70f, 100f, 150f, 200f, 300f)
-    for (s in steps) if (v <= s) return s
+    for (s in NICE_STEPS) if (v <= s) return s
     return (kotlin.math.ceil(v / 100f) * 100f)
 }
 
@@ -214,13 +240,16 @@ private fun PowerChart(series: Series) {
     val batColor = MaterialTheme.colorScheme.primary
     val inColor = MaterialTheme.colorScheme.tertiary
     val grid = MaterialTheme.colorScheme.outlineVariant
-    val valid = (series.batteryW + series.inputW).filter { !it.isNaN() }
-    if (valid.size < 2) {
+    if (series.validCount < 2) {
         Text("等待数据…（至少需要 2 个采样点）")
         return
     }
-    val maxV = niceMax(valid.max())
+    val maxV = niceMax(series.maxW)
     val small = MaterialTheme.typography.labelSmall
+    val batPath = remember { Path() }
+    val inPath = remember { Path() }
+    val stroke = remember { Stroke(width = 3f) }
+
     Row(Modifier.fillMaxWidth().height(150.dp)) {
         Column(
             Modifier.fillMaxHeight().padding(end = 6.dp),
@@ -232,27 +261,30 @@ private fun PowerChart(series: Series) {
             Text("0 W", style = small)
         }
         Canvas(Modifier.weight(1f).fillMaxHeight()) {
-            for (f in floatArrayOf(0f, 0.5f, 1f)) {
+            for (f in GRID_FRACTIONS) {
                 val y = if (f == 1f) size.height - 1f else size.height * f
                 drawLine(grid, Offset(0f, y), Offset(size.width, y), 1f)
             }
-            fun line(vals: List<Float>, color: Color) {
-                if (vals.size < 2) return
-                val path = Path()
+            fun drawSeries(vals: FloatArray, path: Path, color: Color) {
+                val n = vals.size
+                if (n < 2) return
+                path.reset()
                 var started = false
-                vals.forEachIndexed { i, v ->
+                val denom = (n - 1).toFloat()
+                for (i in 0 until n) {
+                    val v = vals[i]
                     if (v.isNaN()) {
                         started = false
                     } else {
-                        val x = size.width * i / (vals.size - 1)
+                        val x = size.width * i / denom
                         val y = size.height * (1f - (v / maxV).coerceIn(0f, 1f))
                         if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
                     }
                 }
-                drawPath(path, color, style = Stroke(width = 3f))
+                drawPath(path, color, style = stroke)
             }
-            line(series.batteryW, batColor)
-            line(series.inputW, inColor)
+            drawSeries(series.batteryW, batPath, batColor)
+            if (series.hasInput) drawSeries(series.inputW, inPath, inColor)
         }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -261,7 +293,7 @@ private fun PowerChart(series: Series) {
     }
     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         LegendDot(batColor, "电池侧功率（估算）")
-        if (series.inputW.any { !it.isNaN() }) LegendDot(inColor, "输入侧功率")
+        if (series.hasInput) LegendDot(inColor, "输入侧功率")
     }
     Text(
         "纵轴：功率（瓦）；横轴：时间，最右为当前。电池侧功率 = 电池端电压 × |电池电流|，是进入电池的功率，" +
@@ -274,7 +306,8 @@ private fun PowerChart(series: Series) {
 // ---------------------------------------------------------------- protocol
 
 @Composable
-private fun ProtocolTab(ui: UiState) {
+private fun ProtocolTab() {
+    val ui by Sampler.state.collectAsState()
     val a = ui.analysis
     if (a == null) { Text("等待首次采样…"); return }
     Section("结论：${a.status.label}") {
@@ -302,32 +335,45 @@ private fun ProtocolTab(ui: UiState) {
 @Composable
 private fun ArchiveTab() {
     val items by Archive.items.collectAsState()
+    val reversed = remember(items) { items.asReversed() }
     var confirm by remember { mutableStateOf(false) }
-    Section("协议识别存档（${items.size} 条，仅保存在本机）") {
-        Text(
-            "当出现“已确认 / 可能 / 证据冲突”的识别结果时自动存档；同一次充电内结果变化会新增一条，拔出充电器时写入峰值。",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        OutlinedButton(
-            onClick = {
-                if (confirm) { Archive.clear(); AppLog.i("已清除识别存档"); confirm = false } else confirm = true
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (confirm) "再次点击确认清除全部存档" else "清除存档") }
-    }
-    if (items.isEmpty()) Text("暂无存档")
-    items.asReversed().forEach { e ->
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("${AppLog.time(e.wallMs)}  ·  ${e.status}", style = MaterialTheme.typography.titleSmall)
-                Text(e.headline)
-                KV("设备", e.device)
-                KV("电量", e.levelPct?.let { "$it %" })
-                KV("输入电压峰值", fmt(e.maxVinV, "V", 1))
-                KV("输入功率峰值", fmt(e.maxInputW, "W", 1))
-                KV("电池侧功率峰值", fmt(e.maxBatteryW, "W", 1))
-                if (e.candidates.isNotEmpty()) Text("候选：" + e.candidates.joinToString("；"), style = MaterialTheme.typography.bodySmall)
-                e.evidence.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(key = "header") {
+            Section("协议识别存档（${items.size} 条，仅保存在本机）") {
+                Text(
+                    "当出现“已确认 / 可能 / 证据冲突”的识别结果时自动存档；同一次充电内结果变化会新增一条，拔出充电器时写入峰值。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedButton(
+                    onClick = {
+                        if (confirm) { Archive.clear(); AppLog.i("已清除识别存档"); confirm = false } else confirm = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (confirm) "再次点击确认清除全部存档" else "清除存档") }
+            }
+        }
+        if (reversed.isEmpty()) {
+            item(key = "empty") { Text("暂无存档") }
+        } else {
+            items(reversed, key = { it.wallMs }) { e ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("${AppLog.time(e.wallMs)}  ·  ${e.status}", style = MaterialTheme.typography.titleSmall)
+                        Text(e.headline)
+                        KV("设备", e.device)
+                        KV("电量", e.levelPct?.let { "$it %" })
+                        KV("输入电压峰值", fmt(e.maxVinV, "V", 1))
+                        KV("输入功率峰值", fmt(e.maxInputW, "W", 1))
+                        KV("电池侧功率峰值", fmt(e.maxBatteryW, "W", 1))
+                        if (e.candidates.isNotEmpty()) Text("候选：" + e.candidates.joinToString("；"), style = MaterialTheme.typography.bodySmall)
+                        e.evidence.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    }
+                }
             }
         }
     }
@@ -336,7 +382,8 @@ private fun ArchiveTab() {
 // ---------------------------------------------------------------- device
 
 @Composable
-private fun DeviceTab(ui: UiState) {
+private fun DeviceTab() {
+    val ui by Sampler.state.collectAsState()
     val s = ui.latest
     Section("设备") {
         KV("型号", "${Build.MANUFACTURER} ${Build.MODEL}")
@@ -394,10 +441,14 @@ private fun Fold(title: String, summary: String, expanded: Boolean, onToggle: ()
 }
 
 @Composable
-private fun DataTab(ui: UiState) {
+private fun DataTab() {
     val ctx: Context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var mode by remember(ui.rootError) { mutableStateOf(Prefs.privMode(ctx).toLong()) }
+    // Subscribe only to rootError and recordedRows so DataTab never recomposes on voltage/chart ticks.
+    val rootError by remember { Sampler.state.map { it.rootError }.distinctUntilChanged() }.collectAsState(null)
+    val recordedRows by remember { Sampler.state.map { it.recordedRows }.distinctUntilChanged() }.collectAsState(0L)
+
+    var mode by remember(rootError) { mutableStateOf(Prefs.privMode(ctx).toLong()) }
     var shz by remember { mutableStateOf(ShizukuBridge.state()) }
     var interval by remember { mutableStateOf(Prefs.intervalMs(ctx)) }
     var auto by remember { mutableStateOf(Prefs.autoRecord(ctx)) }
@@ -407,21 +458,24 @@ private fun DataTab(ui: UiState) {
     var maxMb by remember { mutableStateOf(Prefs.long(ctx, Prefs.FILE_MB, 8L)) }
     var msg by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
+    var diskBytes by remember { mutableLongStateOf(0L) }
     // Accordion: only one block open at a time; all collapsed by default.
     var open by remember { mutableStateOf<String?>(null) }
     val toggle = { t: String -> open = if (open == t) null else t }
+
+    LaunchedEffect(open, recordedRows) {
+        diskBytes = withContext(Dispatchers.IO) {
+            Recorder.diskBytes(ctx) + Archive.sizeBytes() + AppLog.sizeBytes()
+        }
+    }
+
     msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
     val exportCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) scope.launch {
             val ok = withContext(Dispatchers.IO) {
                 try {
-                    Recorder.flush()
-                    val f = Recorder.file(ctx)
-                    if (!f.exists()) false else {
-                        ctx.contentResolver.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out) } }
-                        true
-                    }
+                    ctx.contentResolver.openOutputStream(uri)?.use { out -> Recorder.exportTo(ctx, out) } ?: false
                 } catch (e: Exception) { false }
             }
             msg = if (ok) "CSV 已导出" else "导出失败（尚无记录？）"
@@ -465,7 +519,7 @@ private fun DataTab(ui: UiState) {
         Chips(listOf("30 分钟" to 30L, "1 小时" to 60L, "2 小时" to 120L, "不限" to 0L), maxMin) { maxMin = it; Prefs.setLong(ctx, Prefs.MINUTES, it) }
         Text("电量达到后停止", style = MaterialTheme.typography.labelLarge)
         Chips(listOf("80%" to 80L, "90%" to 90L, "100%" to 100L, "不限" to 0L), stopSoc) { stopSoc = it; Prefs.setLong(ctx, Prefs.SOC, it) }
-        Text("记录文件大小上限", style = MaterialTheme.typography.labelLarge)
+        Text("记录文件大小上限（压缩后）", style = MaterialTheme.typography.labelLarge)
         Chips(listOf("4 MB" to 4L, "8 MB" to 8L, "16 MB" to 16L), maxMb) { maxMb = it; Prefs.setLong(ctx, Prefs.FILE_MB, it) }
         Text("阈值只会停止本应用的记录，不会控制或限制充电。", style = MaterialTheme.typography.bodySmall)
     }
@@ -479,7 +533,7 @@ private fun DataTab(ui: UiState) {
         }
         if (mode == 1L) {
             Text("Root 管理器：" + (RootScanner.detectProvider(ctx)?.label ?: "未检测到 Magisk / KernelSU / APatch"))
-            Text("兼容 Magisk、KernelSU、APatch：都通过标准 su 授权，请在管理器的超级用户列表里允许 ChargeScope。", style = MaterialTheme.typography.bodySmall)
+            Text("兼容 Magisk、KernelSU、APatch：复用单个持久 su 会话，减少反复授权与进程开销。", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(
                 onClick = {
                     msg = "正在检测…（如弹出 Root 授权请点允许）"
@@ -506,28 +560,29 @@ private fun DataTab(ui: UiState) {
                 }) { Text("检测") }
             }
             Text(
-                "Shizuku 提供 adb shell 权限：可读 dumpsys battery，并在多数机型读取 power_supply 节点；个别机型的 SELinux 会限制节点读取。",
+                "Shizuku 提供 adb shell 权限：直接读取 sysfs 与 dumpsys battery，不派生额外 shell 进程。",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
         Text(
-            "只执行固定的只读脚本（读取 sysfs 与 dumpsys battery），不写任何节点；失败会退避，连续失败 3 次自动关闭。",
+            "只执行固定只读采集，不写任何节点；失败会退避，连续失败 3 次自动关闭。",
             style = MaterialTheme.typography.bodySmall,
         )
-        ui.rootError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        rootError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
-    Fold("记录与日志", "${ui.recordedRows} 行", open == "记录与日志", { toggle("记录与日志") }) {
-        Text("已记录 ${ui.recordedRows} 行；数据仅保存在本机，应用没有联网权限。导出文件不含设备标识。")
+    Fold("记录与日志", "$recordedRows 行 · ${fmtBytes(diskBytes)}", open == "记录与日志", { toggle("记录与日志") }) {
+        Text("已记录 $recordedRows 行，本机总占用约 ${fmtBytes(diskBytes)}（CSV 采用 GZIP 压缩存储，导出时自动解压）。应用无联网权限，导出不含设备标识。")
         Button(onClick = { exportCsv.launch("chargescope.csv") }, modifier = Modifier.fillMaxWidth()) { Text("导出 CSV 记录") }
         Button(onClick = { exportLog.launch("chargescope-log.txt") }, modifier = Modifier.fillMaxWidth()) { Text("导出诊断日志") }
         OutlinedButton(
             onClick = {
                 if (confirmClear) {
-                    Recorder.clear(ctx); AppLog.clear(); msg = "已清除记录和日志"; confirmClear = false
+                    Recorder.clear(ctx); AppLog.clear()
+                    diskBytes = Archive.sizeBytes()
+                    msg = "已清除记录和日志"; confirmClear = false
                 } else confirmClear = true
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text(if (confirmClear) "再次点击确认清除记录和日志" else "清除记录和日志") }
-        msg?.let { Text(it) }
     }
 }

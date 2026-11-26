@@ -61,7 +61,7 @@ class AnalyzerTest {
     }
 
     @Test fun dumpsysSectionIsParsed() {
-        val n = RootScanner.parse("@@dumpsys\nAC powered=false\nMax charging voltage=9000000\n")
+        val n = RootScanner.parse("@@dumpsys\n  AC powered: false\n  Max charging voltage: 9000000\n")
         assertEquals("9000000", n[0].props["max_charging_voltage"])
     }
 

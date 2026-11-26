@@ -10,7 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 
-/** Optional Shizuku channel (adb-shell privileges). Read-only: runs the same fixed script as root. */
+/** Optional Shizuku channel (adb-shell privileges). Read-only: reads sysfs + dumpsys battery. */
 object ShizukuBridge {
     private const val REQ = 1001
 
@@ -71,13 +71,23 @@ object ShizukuBridge {
         binding = false
     }
 
+    /** Releases the Shizuku user service process when Shizuku mode is disabled. */
+    fun unbind(ctx: Context) {
+        val current = svc
+        svc = null
+        binding = false
+        if (current != null) {
+            try { Shizuku.unbindUserService(args(ctx.applicationContext), conn, true) } catch (_: Throwable) {}
+        }
+    }
+
     suspend fun scan(ctx: Context): RootScanner.Result = withContext(Dispatchers.IO) {
         val st = state()
         if (st != State.READY) return@withContext RootScanner.Result(emptyList(), st.label)
         try {
             ensureBound(ctx.applicationContext)
             val s = svc ?: return@withContext RootScanner.Result(emptyList(), "Shizuku 服务连接超时")
-            RootScanner.interpret(s.run(RootScanner.SCRIPT), setOf("2000", "0"))
+            RootScanner.interpret(s.run(""), setOf("2000", "0"))
         } catch (e: Throwable) {
             svc = null
             binding = false

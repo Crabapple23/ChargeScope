@@ -67,8 +67,19 @@ data class InputInfo(
     val advCurrentUa: Long? = null,
 )
 
-/** Chart data in watts. NaN marks a missing point. */
-data class Series(val batteryW: List<Float>, val inputW: List<Float>, val spanSec: Int)
+/** Chart data in watts (unboxed FloatArray). NaN marks a missing point. */
+class Series(
+    val batteryW: FloatArray,
+    val inputW: FloatArray,
+    val spanSec: Int,
+    val maxW: Float,
+    val validCount: Int,
+    val hasInput: Boolean,
+) {
+    companion object {
+        val EMPTY = Series(FloatArray(0), FloatArray(0), 0, 0f, 0, false)
+    }
+}
 
 data class ArchiveEntry(
     val wallMs: Long,
@@ -86,7 +97,9 @@ data class ArchiveEntry(
 
 data class UiState(
     val latest: Snapshot? = null,
-    val series: Series = Series(emptyList(), emptyList(), 0),
+    val batteryPowerW: Double? = null,
+    val inputPowerW: Double? = null,
+    val series: Series = Series.EMPTY,
     val analysis: Analysis? = null,
     val metrics: Metrics? = null,
     val recording: Boolean = false,

@@ -10,9 +10,15 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.BufferedWriter
+import java.io.EOFException
 import java.io.File
-import java.io.FileWriter
-import kotlin.math.abs
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.OutputStream
+import java.io.OutputStreamWriter
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
+import kotlin.math.roundToLong
 
 object Prefs {
     const val TEMP = "max_temp_c"
@@ -37,48 +43,67 @@ object Prefs {
     fun setAutoRecord(c: Context, v: Boolean) = sp(c).edit().putBoolean("auto", v).apply()
 }
 
-/** Append-only CSV with buffered writes (flush every few rows) and a size cap. */
+/**
+ * Append-only GZIP-compressed CSV (5x-10x smaller on disk than raw CSV).
+ * Uses syncFlush so flushed blocks remain readable even if the process is killed,
+ * and decompresses on-the-fly when exporting to a plain .csv file.
+ */
 object Recorder {
     private const val HEADER =
         "wall_ms,elapsed_ms,level_pct,status,plugged,voltage_mv,temp_decic,current_ua," +
             "current_avg_ua,charge_counter_uah,battery_power_mw_est,input_voltage_uv,input_current_ua,usb_type"
     private var writer: BufferedWriter? = null
+    private val lineBuf = StringBuilder(160)
     @Volatile var rows: Long = 0
         private set
+    @Volatile var approxBytes: Long = 0
+        private set
 
-    fun file(ctx: Context) = File(ctx.applicationContext.filesDir, "records.csv")
+    fun file(ctx: Context) = File(ctx.applicationContext.filesDir, "records.csv.gz")
+    private fun legacyFile(ctx: Context) = File(ctx.applicationContext.filesDir, "records.csv")
 
     @Synchronized
     fun open(ctx: Context) {
         if (writer != null) return
         val f = file(ctx)
-        // Rotate an oversized file left from earlier sessions.
-        if (f.length() > Prefs.long(ctx, Prefs.FILE_MB, 8L) * 1024 * 1024) {
-            val old = File(f.parentFile, "records.old.csv")
+        val cap = Prefs.long(ctx, Prefs.FILE_MB, 8L) * 1024L * 1024L
+        if (f.length() >= cap) {
+            val old = File(f.parentFile, "records.old.csv.gz")
             old.delete()
             f.renameTo(old)
         }
         val fresh = !f.exists() || f.length() == 0L
-        val w = BufferedWriter(FileWriter(f, true))
+        val gz = GZIPOutputStream(FileOutputStream(f, true), 4096, true)
+        val w = BufferedWriter(OutputStreamWriter(gz, Charsets.UTF_8), 4096)
         if (fresh) { w.write(HEADER); w.newLine() }
         writer = w
+        approxBytes = f.length()
     }
 
     @Synchronized
-    fun append(s: Snapshot, powerMw: Double?, inp: InputInfo) {
+    fun append(ctx: Context, s: Snapshot, powerMw: Double?, inp: InputInfo) {
         val w = writer ?: return
-        val sb = StringBuilder(128)
-        fun f(v: Any?) { sb.append(v?.toString() ?: ""); sb.append(',') }
+        val sb = lineBuf
+        sb.setLength(0)
+        fun f(v: Any?) { if (v != null) sb.append(v); sb.append(',') }
         f(s.wallMs); f(s.elapsedMs); f(s.levelPct); f(s.status); f(s.plugged); f(s.voltageMv)
         f(s.tempDeci); f(s.currentUa); f(s.currentAvgUa); f(s.chargeCounterUah)
-        f(powerMw?.let { "%.1f".format(it) }); f(inp.voltageUv); f(inp.currentUa)
-        sb.append(inp.usbType ?: "")
+        if (powerMw != null) {
+            val tenths = (powerMw * 10.0).roundToLong()
+            sb.append(tenths / 10L).append('.').append(kotlin.math.abs(tenths % 10L))
+        }
+        sb.append(',')
+        f(inp.voltageUv); f(inp.currentUa)
+        if (inp.usbType != null) sb.append(inp.usbType)
         w.write(sb.toString()); w.newLine()
         rows++
-        if (rows % 5L == 0L) w.flush()
+        if (rows % 10L == 0L) {
+            w.flush()
+            approxBytes = file(ctx).length()
+        }
     }
 
-    @Synchronized fun flush() { writer?.flush() }
+    @Synchronized fun flush() { try { writer?.flush() } catch (_: Exception) {} }
 
     @Synchronized
     fun close() {
@@ -87,28 +112,73 @@ object Recorder {
     }
 
     @Synchronized
+    fun exportTo(ctx: Context, out: OutputStream): Boolean {
+        flush()
+        val gz = file(ctx)
+        if (gz.exists() && gz.length() > 0L) {
+            val buf = ByteArray(8192)
+            GZIPInputStream(FileInputStream(gz)).use { input ->
+                try {
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                    }
+                } catch (_: EOFException) {
+                    // Tail block truncated by a prior hard kill; previously flushed rows are intact.
+                }
+            }
+            return true
+        }
+        val legacy = legacyFile(ctx)
+        if (legacy.exists() && legacy.length() > 0L) {
+            legacy.inputStream().use { it.copyTo(out) }
+            return true
+        }
+        return false
+    }
+
+    fun diskBytes(ctx: Context): Long {
+        val dir = ctx.applicationContext.filesDir
+        var total = 0L
+        for (name in arrayOf("records.csv.gz", "records.old.csv.gz", "records.csv", "records.old.csv")) {
+            val f = File(dir, name)
+            if (f.exists()) total += f.length()
+        }
+        return total
+    }
+
+    @Synchronized
     fun clear(ctx: Context) {
         close()
-        file(ctx).delete()
+        val dir = ctx.applicationContext.filesDir
+        for (name in arrayOf("records.csv.gz", "records.old.csv.gz", "records.csv", "records.old.csv")) {
+            File(dir, name).delete()
+        }
         rows = 0
+        approxBytes = 0
     }
 }
 
 object Sampler {
     private const val WINDOW = 300
+    private const val KEEP_NODES = 60
     private const val SERIES = 120
     private const val PRIV_EVERY = 3
 
     private val mutex = Mutex()
-    private val ring = ArrayDeque<Snapshot>()
-    private val batSeries = ArrayDeque<Float>()
-    private val inSeries = ArrayDeque<Float>()
-    private val tsSeries = ArrayDeque<Long>()
+    private val ring = ArrayDeque<Snapshot>(WINDOW + 1)
+    private val batSeries = FloatArray(SERIES)
+    private val inSeries = FloatArray(SERIES)
+    private val tsSeries = LongArray(SERIES)
+    private var seriesSize = 0
+    private var seriesHead = 0
 
     private var tick = 0
     private var privFails = 0
     private var privRetryAt = 0L
     private var privGranted = false
+    private var lastMode = 0
     private var lastNodes: List<RootNode> = emptyList()
     private var privError: String? = null
     private var lastLoggedError: String? = null
@@ -142,9 +212,14 @@ object Sampler {
 
     private suspend fun refreshPrivileged(app: Context) {
         val mode = Prefs.privMode(app)
+        if (mode != lastMode) {
+            if (lastMode == 1) RootScanner.close()
+            if (lastMode == 2) ShizukuBridge.unbind(app)
+            lastMode = mode
+            tick = 0; privFails = 0; privRetryAt = 0L; privGranted = false
+        }
         if (mode == 0) {
-            lastNodes = emptyList(); privError = null; tick = 0
-            privFails = 0; privRetryAt = 0L; privGranted = false
+            lastNodes = emptyList(); privError = null
             return
         }
         val now = SystemClock.elapsedRealtime()
@@ -160,6 +235,8 @@ object Sampler {
             privRetryAt = now + 30_000L
             if (++privFails >= 3) {
                 Prefs.setPrivMode(app, 0)
+                if (mode == 1) RootScanner.close() else ShizukuBridge.unbind(app)
+                lastMode = 0
                 privError = r.error + "（连续失败 3 次，已自动关闭特权增强）"
                 privFails = 0; privGranted = false
             }
@@ -168,6 +245,45 @@ object Sampler {
             lastLoggedError = privError
             AppLog.i(if (privError == null) "特权通道正常（模式 $mode，${lastNodes.size} 个节点）" else "特权通道错误：$privError")
         }
+    }
+
+    private fun pushSeries(batW: Float, inW: Float, ts: Long): Series {
+        val pos = if (seriesSize < SERIES) {
+            (seriesHead + seriesSize++).rem(SERIES)
+        } else {
+            val p = seriesHead
+            seriesHead = (seriesHead + 1) % SERIES
+            p
+        }
+        batSeries[pos] = batW
+        inSeries[pos] = inW
+        tsSeries[pos] = ts
+
+        val n = seriesSize
+        val bOut = FloatArray(n)
+        val iOut = FloatArray(n)
+        var maxW = 0f
+        var valid = 0
+        var hasIn = false
+        for (k in 0 until n) {
+            val idx = (seriesHead + k) % SERIES
+            val b = batSeries[idx]
+            val inp = inSeries[idx]
+            bOut[k] = b
+            iOut[k] = inp
+            if (!b.isNaN()) {
+                valid++
+                if (b > maxW) maxW = b
+            }
+            if (!inp.isNaN()) {
+                valid++
+                hasIn = true
+                if (inp > maxW) maxW = inp
+            }
+        }
+        val firstTs = tsSeries[seriesHead]
+        val lastTs = tsSeries[(seriesHead + n - 1) % SERIES]
+        return Series(bOut, iOut, ((lastTs - firstTs) / 1000L).toInt(), maxW, valid, hasIn)
     }
 
     private fun trackArchive(s: Snapshot, analysis: Analysis, inp: InputInfo, batW: Float) {
@@ -216,26 +332,31 @@ object Sampler {
         withContext(Dispatchers.Default) {
             val s = Collector.battery(app).copy(rootNodes = lastNodes)
             ring.addLast(s)
-            while (ring.size > WINDOW) ring.removeFirst()
-            val list = ring.toList()
+            if (ring.size > WINDOW) ring.removeFirst()
+            // Drop bulky sysfs maps from snapshots older than the analysis window (60 samples).
+            val stripIdx = ring.size - KEEP_NODES - 1
+            if (stripIdx >= 0 && ring[stripIdx].rootNodes.isNotEmpty()) {
+                ring[stripIdx] = ring[stripIdx].copy(rootNodes = emptyList())
+            }
+
             val inp = Analyzer.input(s)
             val powerMw = Analyzer.powerMw(s)
-            val batW = powerMw?.let { (it / 1000.0).toFloat() } ?: Float.NaN
-            val inW = Analyzer.inputPowerW(inp)?.toFloat() ?: Float.NaN
-            batSeries.addLast(batW); inSeries.addLast(inW); tsSeries.addLast(s.elapsedMs)
-            while (batSeries.size > SERIES) { batSeries.removeFirst(); inSeries.removeFirst(); tsSeries.removeFirst() }
+            val batW = powerMw?.div(1000.0)
+            val inW = Analyzer.inputPowerW(inp)
+            val batF = batW?.toFloat() ?: Float.NaN
+            val inF = inW?.toFloat() ?: Float.NaN
+            val series = pushSeries(batF, inF, s.elapsedMs)
 
-            val analysis = Analyzer.analyze(list, Build.MANUFACTURER)
-            trackArchive(s, analysis, inp, batW)
-            if (recording) Recorder.append(s, powerMw, inp)
+            val analysis = Analyzer.analyze(ring, Build.MANUFACTURER)
+            trackArchive(s, analysis, inp, batF)
+            if (recording) Recorder.append(app, s, powerMw, inp)
             _state.value = UiState(
                 latest = s,
-                series = Series(
-                    batSeries.toList(), inSeries.toList(),
-                    ((tsSeries.last() - tsSeries.first()) / 1000L).toInt(),
-                ),
+                batteryPowerW = batW,
+                inputPowerW = inW,
+                series = series,
                 analysis = analysis,
-                metrics = Analyzer.metrics(list),
+                metrics = Analyzer.metrics(ring),
                 recording = recording,
                 recordedRows = Recorder.rows,
                 rootError = privError,

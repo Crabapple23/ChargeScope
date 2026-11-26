@@ -7,31 +7,37 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.io.FileOutputStream
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
-/** Small append-only event log (capped) used for the diagnostic export. */
+/** Small append-only event log (capped at 128 KB) used for the diagnostic export. */
 object AppLog {
-    private const val MAX_BYTES = 256 * 1024
+    private const val MAX_BYTES = 128 * 1024
+    private const val KEEP_BYTES = 64 * 1024
+    private val FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
     private var file: File? = null
 
     fun init(ctx: Context) {
         if (file == null) file = File(ctx.applicationContext.filesDir, "events.log")
     }
 
-    private fun ts(t: Long = System.currentTimeMillis()) =
-        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(t))
+    private fun ts(t: Long = System.currentTimeMillis()): String =
+        Instant.ofEpochMilli(t).atZone(ZoneId.systemDefault()).format(FMT)
 
     @Synchronized
     fun i(msg: String) {
         val f = file ?: return
         try {
             if (f.length() > MAX_BYTES) {
-                val keep = f.readText().takeLast(MAX_BYTES / 2)
-                f.writeText(keep.substringAfter('\n', keep))
+                val raw = f.readBytes()
+                var start = (raw.size - KEEP_BYTES).coerceAtLeast(0)
+                while (start < raw.size && raw[start] != '\n'.code.toByte()) start++
+                if (start < raw.size) start++
+                FileOutputStream(f, false).use { it.write(raw, start, raw.size - start) }
             }
-            f.appendText("${ts()} $msg\n")
+            FileOutputStream(f, true).use { it.write("${ts()} $msg\n".toByteArray(Charsets.UTF_8)) }
         } catch (_: Exception) {
         }
     }
@@ -40,14 +46,17 @@ object AppLog {
     fun read(): String = try { file?.takeIf { it.exists() }?.readText() ?: "" } catch (_: Exception) { "" }
 
     @Synchronized
+    fun sizeBytes(): Long = try { file?.takeIf { it.exists() }?.length() ?: 0L } catch (_: Exception) { 0L }
+
+    @Synchronized
     fun clear() { try { file?.delete() } catch (_: Exception) {} }
 
     fun time(t: Long) = ts(t)
 }
 
-/** Persisted protocol-identification archive (JSON lines, newest last, capped, clearable). */
+/** Persisted protocol-identification archive (JSON lines, newest last, capped at 100, clearable). */
 object Archive {
-    private const val MAX = 200
+    private const val MAX = 100
     private var file: File? = null
     private val _items = MutableStateFlow<List<ArchiveEntry>>(emptyList())
     val items = _items.asStateFlow()
@@ -66,17 +75,36 @@ object Archive {
             }
         } catch (_: Exception) {
         }
-        _items.value = list.takeLast(MAX)
+        if (list.size > MAX) {
+            _items.value = list.takeLast(MAX)
+            rewrite()
+        } else {
+            _items.value = list
+        }
     }
 
     @Synchronized
     fun upsert(e: ArchiveEntry) {
         val cur = _items.value.toMutableList()
         val idx = cur.indexOfFirst { it.wallMs == e.wallMs }
-        if (idx >= 0) cur[idx] = e else cur += e
-        _items.value = cur.takeLast(MAX)
-        persist()
+        if (idx >= 0) {
+            cur[idx] = e
+            _items.value = cur
+            rewrite()
+        } else {
+            cur += e
+            if (cur.size > MAX) {
+                _items.value = cur.takeLast(MAX)
+                rewrite()
+            } else {
+                _items.value = cur
+                appendLine(e)
+            }
+        }
     }
+
+    @Synchronized
+    fun sizeBytes(): Long = try { file?.takeIf { it.exists() }?.length() ?: 0L } catch (_: Exception) { 0L }
 
     @Synchronized
     fun clear() {
@@ -84,10 +112,23 @@ object Archive {
         try { file?.delete() } catch (_: Exception) {}
     }
 
-    private fun persist() {
+    private fun appendLine(e: ArchiveEntry) {
         val f = file ?: return
         try {
-            f.writeText(_items.value.joinToString("\n") { toJson(it).toString() } + "\n")
+            FileOutputStream(f, true).use { it.write((toJson(e).toString() + "\n").toByteArray(Charsets.UTF_8)) }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun rewrite() {
+        val f = file ?: return
+        try {
+            f.bufferedWriter().use { w ->
+                for (item in _items.value) {
+                    w.write(toJson(item).toString())
+                    w.newLine()
+                }
+            }
         } catch (_: Exception) {
         }
     }
@@ -128,7 +169,7 @@ object Report {
         fun line(s: String = "") { sb.append(s).append('\n') }
         line("# ChargeScope 诊断日志")
         line("生成时间：" + AppLog.time(System.currentTimeMillis()))
-        line("应用版本：0.3.0")
+        line("应用版本：0.4.0")
         line("设备：${Build.MANUFACTURER} ${Build.MODEL}  Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         if (Build.VERSION.SDK_INT >= 31) line("SoC：${Build.SOC_MODEL}")
         line()

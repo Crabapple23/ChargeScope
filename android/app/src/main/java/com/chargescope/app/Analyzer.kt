@@ -15,6 +15,9 @@ object Analyzer {
 
     internal data class Cls(val label: String, val family: String, val fast: Boolean, val rank: Int)
 
+    private val PROTOCOL_KEYS = arrayOf("usb_type", "real_type", "type")
+    private val FIXED_VOLTS = doubleArrayOf(9.0, 12.0, 15.0, 20.0, 28.0, 36.0, 48.0)
+
     internal fun classify(raw: String): Cls? {
         val t = raw.uppercase().replace('-', '_').replace(' ', '_')
         if (t.isEmpty() || "DRP" in t) return null
@@ -98,7 +101,7 @@ object Analyzer {
 
     private data class Profile(val brand: String, val name: String, val v: Double, val a: Double)
 
-    private val PROFILES = listOf(
+    private val PROFILES = arrayOf(
         Profile("PD", "USB PD 9V/3A (27W)", 9.0, 3.0),
         Profile("PD", "USB PD 15V/3A (45W)", 15.0, 3.0),
         Profile("PD", "USB PD 20V/3A (60W)", 20.0, 3.0),
@@ -170,37 +173,55 @@ object Analyzer {
         }
     }
 
-    private fun match(v: Double, a: Double, brand: String?): List<String> =
-        PROFILES.filter { abs(v - it.v) / it.v <= 0.06 && abs(a - it.a) / it.a <= 0.10 }
-            .sortedByDescending { it.brand == brand }
-            .map { (if (it.brand == brand) "★" else "") + it.name }
+    private fun match(v: Double, a: Double, brand: String?, suffix: String = ""): List<String> {
+        val preferred = ArrayList<String>(4)
+        val others = ArrayList<String>(4)
+        for (p in PROFILES) {
+            if (abs(v - p.v) / p.v <= 0.06 && abs(a - p.a) / p.a <= 0.10) {
+                if (p.brand == brand) preferred += "★" + p.name + suffix
+                else others += p.name + suffix
+            }
+        }
+        if (preferred.isEmpty()) return others
+        preferred.addAll(others)
+        return preferred
+    }
 
     /** Observes the input-voltage pattern: fixed steps (PD/QC2/AFC) vs adjustable (PPS/QC3/UFCS). */
-    private fun voltagePattern(vols: List<Long>, ev: MutableList<Evidence>, cand: MutableSet<String>) {
-        val hv = vols.filter { it > 5_500_000L }
-        if (hv.isEmpty()) return
-        val fixed = doubleArrayOf(9.0, 12.0, 15.0, 20.0, 28.0, 36.0, 48.0)
-        val volts = hv.map { it / 1e6 }
-        val levels = volts.map { (it * 10).roundToLong() / 10.0 }.distinct().sorted()
-        ev += Evidence(3, "观察到的高压档位：" + levels.joinToString(" / ") { "%.1fV".format(it) })
-        val allFixed = volts.all { v -> fixed.any { abs(v - it) <= 0.35 } }
+    private fun voltagePattern(vols: LongArray, count: Int, ev: MutableList<Evidence>, cand: MutableSet<String>) {
+        val levels = HashSet<Long>(8)
+        var allFixed = true
+        var stepCount = 0
+        var minStep = Double.MAX_VALUE
+        for (idx in 0 until count) {
+            val uv = vols[idx]
+            if (idx > 0) {
+                val d = abs(uv - vols[idx - 1]) / 1000.0
+                if (d >= 10.0 && d < 1000.0) {
+                    stepCount++
+                    if (d < minStep) minStep = d
+                }
+            }
+            if (uv > 5_500_000L) {
+                val v = uv / 1e6
+                levels += (v * 10.0).roundToLong()
+                if (allFixed && FIXED_VOLTS.none { abs(v - it) <= 0.35 }) allFixed = false
+            }
+        }
+        if (levels.isEmpty()) return
+        val sorted = levels.sorted()
+        ev += Evidence(3, "观察到的高压档位：" + sorted.joinToString(" / ") { "%.1fV".format(it / 10.0) })
         cand += if (allFixed) {
             "USB PD 固定档 / QC 2.0 / AFC"
         } else {
             "PPS / QC 3.0 / UFCS / 厂商私有"
         }
-        val steps = ArrayList<Double>()
-        for (i in 1 until vols.size) {
-            val d = abs(vols[i] - vols[i - 1]) / 1000.0
-            if (d >= 10.0 && d < 1000.0) steps += d
-        }
-        if (steps.size >= 2) {
-            val m = steps.min()
-            if (m <= 60.0) {
-                ev += Evidence(3, "调压步进最小约 %.0f mV，接近 PPS / UFCS 的 20 mV 量级（受采样精度影响）".format(m))
+        if (stepCount >= 2) {
+            if (minStep <= 60.0) {
+                ev += Evidence(3, "调压步进最小约 %.0f mV，接近 PPS / UFCS 的 20 mV 量级（受采样精度影响）".format(minStep))
                 cand += "USB PD PPS / UFCS"
-            } else if (m in 150.0..260.0) {
-                ev += Evidence(3, "调压步进最小约 %.0f mV，接近 QC 3.0 的 200 mV 量级".format(m))
+            } else if (minStep in 150.0..260.0) {
+                ev += Evidence(3, "调压步进最小约 %.0f mV，接近 QC 3.0 的 200 mV 量级".format(minStep))
                 cand += "QC 3.0"
             }
         }
@@ -226,7 +247,7 @@ object Analyzer {
         val l4 = LinkedHashMap<String, Cls>()
         for (n in last.rootNodes) {
             if (!isInputNode(n)) continue
-            for (key in arrayOf("usb_type", "real_type", "type")) {
+            for (key in PROTOCOL_KEYS) {
                 val raw = n.props[key] ?: continue
                 val tok = activeToken(raw) ?: continue
                 val c = classify(tok) ?: continue
@@ -236,23 +257,42 @@ object Analyzer {
             }
         }
 
-        // L3: input side observations over the recent window.
-        val inputs = window.takeLast(60).map { input(it) }
-        val vols = inputs.mapNotNull { it.voltageUv }
-        val maxVin = vols.maxOrNull() ?: 0L
-        val inp = input(last)
-        if (inp.voltageUv != null) {
-            val p = inputPowerW(inp)
+        // L3: single pass over the last 60 snapshots without copying the window.
+        val start = (window.size - 60).coerceAtLeast(0)
+        val span = window.size - start
+        val vols = LongArray(span)
+        var volCount = 0
+        var maxVin = 0L
+        var advV: Long? = null
+        var advI: Long? = null
+        var bestP = 0.0; var bestV = 0.0; var bestI = 0.0
+        var lastInp = InputInfo(null, null, null)
+
+        for (idx in start until window.size) {
+            val x = input(window[idx])
+            if (idx == window.size - 1) lastInp = x
+            val v = x.voltageUv
+            if (v != null) {
+                vols[volCount++] = v
+                if (v > maxVin) maxVin = v
+                val i = x.currentUa
+                if (i != null) {
+                    val p = v.toDouble() * abs(i.toDouble())
+                    if (p > bestP) { bestP = p; bestV = v / 1e6; bestI = abs(i) / 1e6 }
+                }
+            }
+            if (x.advVoltageUv != null) { advV = x.advVoltageUv; advI = x.advCurrentUa }
+        }
+
+        if (lastInp.voltageUv != null) {
+            val p = inputPowerW(lastInp)
             evidence += Evidence(
                 3,
-                "输入侧电压 %.2f V".format(inp.voltageUv / 1e6) +
-                    (inp.currentUa?.let { "，电流 %.0f mA".format(abs(it) / 1000.0) } ?: "") +
+                "输入侧电压 %.2f V".format(lastInp.voltageUv!! / 1e6) +
+                    (lastInp.currentUa?.let { "，电流 %.0f mA".format(abs(it) / 1000.0) } ?: "") +
                     (p?.let { "，约 %.1f W".format(it) } ?: ""),
             )
         }
-        val adv = inputs.lastOrNull { it.advVoltageUv != null }
-        val advV = adv?.advVoltageUv
-        val advI = adv?.advCurrentUa
         if (advV != null) {
             evidence += Evidence(
                 3,
@@ -260,19 +300,11 @@ object Analyzer {
                     (advI?.let { "，最大电流 %.2f A".format(it / 1e6) } ?: "") + "（上限值，不代表当前协商结果）",
             )
         }
-        voltagePattern(vols, evidence, candidates)
+        voltagePattern(vols, volCount, evidence, candidates)
 
-        // Spec-table match, using the sample with the highest input power.
-        var bestP = 0.0; var bestV = 0.0; var bestI = 0.0
-        for (x in inputs) {
-            val v = x.voltageUv ?: continue
-            val i = x.currentUa ?: continue
-            val p = v.toDouble() * abs(i.toDouble())
-            if (p > bestP) { bestP = p; bestV = v / 1e6; bestI = abs(i) / 1e6 }
-        }
         val matched = when {
             bestP > 0 && bestV > 5.5 && bestI >= 0.5 -> match(bestV, bestI, brand)
-            advV != null && advV > 5_500_000L && advI != null -> match(advV / 1e6, advI / 1e6, brand).map { "$it（宣告值）" }
+            advV != null && advV > 5_500_000L && advI != null -> match(advV / 1e6, advI / 1e6, brand, "（宣告值）")
             else -> emptyList()
         }
         if (matched.isNotEmpty()) {
@@ -281,10 +313,9 @@ object Analyzer {
         }
 
         // L2 / L1 references.
-        powerMw(last)?.let {
-            if (it >= 15_000.0) {
-                evidence += Evidence(2, "电池侧估算功率约 %.1f W（仅参考，不能确认协议）".format(it / 1000.0))
-            }
+        val batMw = powerMw(last)
+        if (batMw != null && batMw >= 15_000.0) {
+            evidence += Evidence(2, "电池侧估算功率约 %.1f W（仅参考，不能确认协议）".format(batMw / 1000.0))
         }
         if (brand != null) {
             evidence += Evidence(1, "本机品牌 $brand，常见私有协议：${BRAND_PROTOCOLS[brand]}（仅缩小范围）")
@@ -292,7 +323,7 @@ object Analyzer {
         if (last.rootNodes.isEmpty()) {
             limits += "未启用 Root / Shizuku 或无法读取 sysfs：只有电池侧数据，无法识别协议。"
         }
-        if (vols.size >= 2) limits += "电压步进判断受采样间隔和驱动上报精度影响，仅作参考。"
+        if (volCount >= 2) limits += "电压步进判断受采样间隔和驱动上报精度影响，仅作参考。"
 
         val cl = candidates.toList()
         val driver = if (l4.isEmpty()) null else l4.values.joinToString(" / ") { it.label }
@@ -302,13 +333,13 @@ object Analyzer {
         }
 
         // Plain-language description combining both layers.
-        val desc = StringBuilder()
+        val desc = StringBuilder(160)
         desc.append(
             if (driver != null) "驱动层（sysfs 的 usb_type / type 等）报告：$driver。"
             else "驱动层没有报告协议名称（无 Root/Shizuku，或该机型节点不提供）。",
         )
         if (predicted != null) {
-            val basis = ArrayList<String>()
+            val basis = ArrayList<String>(2)
             if (bestV > 5.5) basis += "输入侧约 %.1f V".format(bestV) + (if (bestI > 0) "、%.2f A".format(bestI) else "")
             else if (maxVin > 5_500_000L) basis += "输入侧出现 %.1f V 高压".format(maxVin / 1e6)
             else if (advV != null) basis += "充电器宣告上限 %.1f V".format(advV / 1e6)
@@ -320,8 +351,8 @@ object Analyzer {
         } else {
             desc.append("输入侧数据不足，暂时无法预测具体协议。")
         }
-        powerMw(last)?.let {
-            desc.append("当前电池侧估算功率约 %.1f W（仅参考，不能用来确认协议）。".format(it / 1000.0))
+        if (batMw != null) {
+            desc.append("当前电池侧估算功率约 %.1f W（仅参考，不能用来确认协议）。".format(batMw / 1000.0))
         }
         val description = desc.toString()
 
@@ -356,20 +387,25 @@ object Analyzer {
         if (list.isEmpty()) return Metrics(0, 0, null, null, null, null)
         var pSum = 0.0; var pN = 0; var peak: Double? = null
         var tSum = 0.0; var tN = 0
-        for (s in list) {
+        var firstLvl: Snapshot? = null
+        var lastLvl: Snapshot? = null
+        for (i in list.indices) {
+            val s = list[i]
             powerMw(s)?.let {
                 pSum += it; pN++
                 val pk = peak
                 if (pk == null || it > pk) peak = it
             }
             s.tempDeci?.let { tSum += it; tN++ }
+            if (s.levelPct != null) {
+                if (firstLvl == null) firstLvl = s
+                lastLvl = s
+            }
         }
-        val first = list.firstOrNull { it.levelPct != null }
-        val lastLvl = list.lastOrNull { it.levelPct != null }
         var rate: Double? = null
-        if (first != null && lastLvl != null) {
-            val minutes = (lastLvl.elapsedMs - first.elapsedMs) / 60_000.0
-            if (minutes >= 1.0) rate = (lastLvl.levelPct!! - first.levelPct!!) / minutes
+        if (firstLvl != null && lastLvl != null) {
+            val minutes = (lastLvl.elapsedMs - firstLvl.elapsedMs) / 60_000.0
+            if (minutes >= 1.0) rate = (lastLvl.levelPct!! - firstLvl.levelPct!!) / minutes
         }
         return Metrics(
             count = list.size,

@@ -37,6 +37,7 @@ class SamplingService : Service() {
     @Volatile private var armed = false
     @Volatile private var suppressed = false
     private var receiverOn = false
+    private var channelReady = false
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -132,6 +133,7 @@ class SamplingService : Service() {
         job?.cancel()
         job = null
         Recorder.close()
+        RootScanner.close()
         Sampler.setRecording(false)
         Sampler.setNotice(reason)
     }
@@ -155,14 +157,17 @@ class SamplingService : Service() {
             maxMin > 0 && SystemClock.elapsedRealtime() - startedAt >= maxMin * 60_000L ->
                 "已达到最长记录时长 $maxMin 分钟"
             soc in 1..100 && (s.levelPct ?: 0) >= soc -> "电量已达到 $soc%"
-            Recorder.file(ctx).length() >= maxMb * 1024L * 1024L -> "记录文件已达到 $maxMb MB 上限"
+            Recorder.approxBytes >= maxMb * 1024L * 1024L -> "记录文件已达到 $maxMb MB 上限"
             else -> null
         }
     }
 
     private fun ensureForeground() {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "充电采样", NotificationManager.IMPORTANCE_LOW))
+        if (!channelReady) {
+            getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(NotificationChannel(CHANNEL, "充电采样", NotificationManager.IMPORTANCE_LOW))
+            channelReady = true
+        }
         ServiceCompat.startForeground(
             this, ID, notification("ChargeScope 运行中"),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0,
@@ -189,6 +194,7 @@ class SamplingService : Service() {
         job?.cancel()
         scope.cancel()
         Recorder.close()
+        RootScanner.close()
         Sampler.setRecording(false)
         super.onDestroy()
     }

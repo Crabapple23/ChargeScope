@@ -6,17 +6,24 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.SystemClock
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import java.io.BufferedReader
+import java.io.BufferedWriter
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 object Collector {
+    private val BATTERY_FILTER = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+
     /** Unprivileged battery data from public Android APIs. Cheap: sticky broadcast + a few binder calls. */
     fun battery(ctx: Context): Snapshot {
         val elapsed = SystemClock.elapsedRealtime()
         val wall = System.currentTimeMillis()
-        val i = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val i = ctx.registerReceiver(null, BATTERY_FILTER)
             ?: return Snapshot(elapsed, wall, null, null, 0, null, null, null, null, null, null)
         val bm = ctx.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
 
@@ -50,50 +57,113 @@ object Collector {
 }
 
 /**
- * Privileged read-only channel shared by root (Magisk / KernelSU / APatch via `su`) and Shizuku.
- * One fixed script is executed; it only reads /sys/class/power_supply/<node>/<field> and
- * `dumpsys battery`. Nothing is written and no user input reaches the shell.
+ * Privileged read-only channel for root (Magisk / KernelSU / APatch via persistent `su`).
+ * Keeps one interactive `su` session open while root mode is enabled to avoid repeated
+ * `su` forks and root-daemon IPC. Executes only a fixed read-only script; nothing is written.
  */
 object RootScanner {
     class Result(val nodes: List<RootNode>, val error: String?)
 
+    private const val END = "@@CS_END@@"
     private const val FIELDS =
         "type status online present capacity voltage_now current_now current_avg power_now " +
             "voltage_max current_max usb_type real_type charge_type temp input_current_limit " +
             "constant_charge_current charge_counter"
 
-    internal val SCRIPT = "echo \"#uid=\$(id -u)\"; " +
+    // No `sed` subprocess: `dumpsys battery` is parsed directly in Kotlin.
+    private val SCRIPT = "echo \"#uid=\$(id -u)\"; " +
         "for d in /sys/class/power_supply/*; do " +
         "echo \"@@\${d##*/}\"; " +
         "for f in $FIELDS; do v=; { read -r v < \"\$d/\$f\"; } 2>/dev/null && echo \"\$f=\$v\"; done; " +
         "done; " +
-        "echo \"@@dumpsys\"; dumpsys battery 2>/dev/null | sed 's/^ *//; s/: /=/'"
+        "echo \"@@dumpsys\"; dumpsys battery 2>/dev/null; " +
+        "echo $END\n"
+
+    private val lock = Any()
+    private val readerExec = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "cs-root").apply { isDaemon = true }
+    }
+    private var proc: Process? = null
+    private var writer: BufferedWriter? = null
+    private var reader: BufferedReader? = null
+
+    /** Closes the persistent `su` session (e.g. when root mode is turned off or service stops). */
+    fun close() {
+        synchronized(lock) { destroySession() }
+    }
+
+    private fun destroySession() {
+        val p = proc
+        proc = null
+        writer = null
+        reader = null
+        if (p != null) {
+            try { p.destroyForcibly() } catch (_: Exception) {}
+        }
+    }
+
+    private fun ensureSession(): Boolean {
+        val cur = proc
+        if (cur != null && cur.isAlive) return true
+        destroySession()
+        val p = ProcessBuilder("su").redirectErrorStream(false).start()
+        proc = p
+        writer = BufferedWriter(OutputStreamWriter(p.outputStream))
+        reader = BufferedReader(InputStreamReader(p.inputStream))
+        return true
+    }
 
     suspend fun scan(timeoutSec: Long = 4): Result = withContext(Dispatchers.IO) {
-        try {
-            // Works for Magisk, KernelSU (Next/Suki) and APatch: all expose a standard `su`.
-            // The script goes through stdin (not `-c`), which every su variant accepts.
-            val p = ProcessBuilder("su").redirectErrorStream(false).start()
-            p.outputStream.bufferedWriter().use {
-                it.write(SCRIPT + "\n")
-                it.write("exit\n")
-            }
-            coroutineScope {
-                val out = async { p.inputStream.bufferedReader().use { it.readText() } }
-                val err = async { p.errorStream.bufferedReader().use { it.readText() } }
-                if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) {
-                    p.destroyForcibly()
-                    return@coroutineScope Result(emptyList(), "su 等待超时（请在 Root 管理器弹窗中授权后重试）")
+        synchronized(lock) {
+            try {
+                ensureSession()
+                val p = proc
+                val w = writer
+                val r = reader
+                if (p == null || w == null || r == null) {
+                    Result(emptyList(), "su 通道不可用")
+                } else {
+                    w.write(SCRIPT)
+                    w.flush()
+
+                    val future = readerExec.submit(Callable<String?> {
+                        val sb = StringBuilder(2048)
+                        var out: String? = null
+                        while (true) {
+                            val line = r.readLine() ?: break
+                            if (line == END) {
+                                out = sb.toString()
+                                break
+                            }
+                            sb.append(line).append('\n')
+                        }
+                        out
+                    })
+
+                    val text = try {
+                        future.get(timeoutSec, TimeUnit.SECONDS)
+                    } catch (_: TimeoutException) {
+                        future.cancel(true)
+                        destroySession()
+                        return@synchronized Result(emptyList(), "su 等待超时（请在 Root 管理器弹窗中授权后重试）")
+                    }
+
+                    if (text == null) {
+                        val errText = try { p.errorStream.bufferedReader().use { it.readText().trim().take(100) } } catch (_: Exception) { "" }
+                        destroySession()
+                        Result(emptyList(), "su 被拒绝或未授权" + (if (errText.isEmpty()) "" else "：$errText"))
+                    } else {
+                        val res = interpret(text, setOf("0"))
+                        if (res.error != null && !text.contains("#uid=")) {
+                            destroySession()
+                        }
+                        res
+                    }
                 }
-                val text = out.await()
-                val r = interpret(text, setOf("0"))
-                if (r.error != null && !text.contains("#uid=")) {
-                    val why = err.await().trim().take(100)
-                    Result(emptyList(), "su 被拒绝或未授权" + (if (why.isEmpty()) "" else "：$why"))
-                } else r
+            } catch (e: Exception) {
+                destroySession()
+                Result(emptyList(), "未检测到可用的 su（未 Root，或未在 Root 管理器中授权）")
             }
-        } catch (e: Exception) {
-            Result(emptyList(), "未检测到可用的 su（未 Root，或未在 Root 管理器中授权）")
         }
     }
 
@@ -146,10 +216,13 @@ object RootScanner {
                 name = line.substring(2).trim()
                 props = LinkedHashMap()
             } else {
-                val idx = line.indexOf('=')
-                if (idx > 0) {
-                    val k = line.substring(0, idx).trim().lowercase().replace(' ', '_')
-                    props[k] = line.substring(idx + 1).trim()
+                // Support both `key=value` (sysfs) and `key: value` (raw `dumpsys battery`).
+                val eq = line.indexOf('=')
+                val sep = if (eq > 0) eq else if (name == "dumpsys") line.indexOf(':') else -1
+                if (sep > 0) {
+                    val k = line.substring(0, sep).trim().lowercase().replace(' ', '_')
+                    val v = line.substring(sep + 1).trim()
+                    if (k.isNotEmpty() && v.isNotEmpty()) props[k] = v
                 }
             }
         }
