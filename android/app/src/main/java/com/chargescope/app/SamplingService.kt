@@ -149,7 +149,7 @@ class SamplingService : Service() {
         if (s == null) return null
         val maxTemp = Prefs.long(ctx, Prefs.TEMP, 45L)
         val maxMin = Prefs.long(ctx, Prefs.MINUTES, 120L)
-        val soc = Prefs.long(ctx, Prefs.SOC, 0L)
+        val soc = Prefs.long(ctx, Prefs.SOC, 100L)
         val maxMb = Prefs.long(ctx, Prefs.FILE_MB, 8L)
         val t = s.tempDeci
         return when {

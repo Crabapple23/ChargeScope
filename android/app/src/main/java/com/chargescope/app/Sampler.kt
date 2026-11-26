@@ -42,7 +42,7 @@ object Prefs {
     }
     fun setPrivMode(c: Context, v: Int) = sp(c).edit().putInt("priv", v).apply()
 
-    fun autoRecord(c: Context): Boolean = sp(c).getBoolean("auto", false)
+    fun autoRecord(c: Context): Boolean = sp(c).getBoolean("auto", true)
     fun setAutoRecord(c: Context, v: Boolean) = sp(c).edit().putBoolean("auto", v).apply()
 
     /** 0 = follow system (default), 1 = light, 2 = dark */

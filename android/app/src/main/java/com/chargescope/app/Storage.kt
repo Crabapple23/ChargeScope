@@ -196,7 +196,7 @@ object Report {
         line("Shizuku 状态：" + ShizukuBridge.state().label)
         line("采样间隔：${Prefs.intervalMs(ctx)} ms；自动记录：${Prefs.autoRecord(ctx)}")
         line("阈值：温度 ${Prefs.long(ctx, Prefs.TEMP, 45L)}°C，时长 ${Prefs.long(ctx, Prefs.MINUTES, 120L)} 分钟，" +
-            "电量 ${Prefs.long(ctx, Prefs.SOC, 0L)}%，文件 ${Prefs.long(ctx, Prefs.FILE_MB, 8L)} MB")
+            "电量 ${Prefs.long(ctx, Prefs.SOC, 100L)}%，文件 ${Prefs.long(ctx, Prefs.FILE_MB, 8L)} MB")
         ui.rootError?.let { line("特权通道错误：$it") }
         line()
         val s = ui.latest

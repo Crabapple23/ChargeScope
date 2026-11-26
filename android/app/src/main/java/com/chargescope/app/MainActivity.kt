@@ -24,6 +24,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -622,7 +623,10 @@ private val PRIV_OPTS = listOf("关闭" to 0L, "Root" to 1L, "Shizuku" to 2L)
 
 @Composable
 private fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: (Long) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         options.forEach { (label, v) ->
             FilterChip(selected = selected == v, onClick = { onSelect(v) }, label = { Text(label) })
         }
@@ -680,7 +684,7 @@ private fun DataTab() {
     var auto by remember { mutableStateOf(Prefs.autoRecord(ctx)) }
     var maxTemp by remember { mutableStateOf(Prefs.long(ctx, Prefs.TEMP, 45L)) }
     var maxMin by remember { mutableStateOf(Prefs.long(ctx, Prefs.MINUTES, 120L)) }
-    var stopSoc by remember { mutableStateOf(Prefs.long(ctx, Prefs.SOC, 0L)) }
+    var stopSoc by remember { mutableStateOf(Prefs.long(ctx, Prefs.SOC, 100L)) }
     var maxMb by remember { mutableStateOf(Prefs.long(ctx, Prefs.FILE_MB, 8L)) }
     var msg by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -738,9 +742,14 @@ private fun DataTab() {
         Text(tr("开启后会常驻一条低优先级通知（空闲时不采样）。系统重启后需打开一次应用以恢复。", "Shows a low-priority notification while idle (no sampling). Open the app once after reboot to re-arm."), style = MaterialTheme.typography.bodySmall)
     }
     Fold(
-        tr("安全阈值（任一触发即停止记录）", "Safety Limits (Stop Recording)"),
-        "${maxTemp}°C · " + (if (maxMin > 0) "${maxMin}m" else tr("不限时", "No limit")) + " · " + (if (stopSoc > 0) "${stopSoc}%" else tr("不限电量", "Any SOC")) + " · ${maxMb}MB",
+        tr("安全阈值", "Safety Limits"),
+        "${maxTemp}°C · " + (if (maxMin > 0) tr("${maxMin}分", "${maxMin}m") else tr("不限时", "No limit")) + " · " + (if (stopSoc > 0) "${stopSoc}%" else tr("不限", "Any")) + " · ${maxMb}MB",
     ) {
+        Text(
+            tr("达到以下任一上限时自动停止记录（仅停止采样，不影响手机充电）：", "Auto-stops recording when any limit is reached (never controls charging):"),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Text(tr("电池温度上限", "Max Battery Temp"), style = MaterialTheme.typography.labelLarge)
         Chips(TEMP_OPTS, maxTemp) { maxTemp = it; Prefs.setLong(ctx, Prefs.TEMP, it) }
         Text(tr("单次最长时长", "Max Session Duration"), style = MaterialTheme.typography.labelLarge)
@@ -749,7 +758,6 @@ private fun DataTab() {
         Chips(SOC_OPTS, stopSoc) { stopSoc = it; Prefs.setLong(ctx, Prefs.SOC, it) }
         Text(tr("记录文件大小上限（压缩后）", "Max Log File Size (GZIP)"), style = MaterialTheme.typography.labelLarge)
         Chips(MB_OPTS, maxMb) { maxMb = it; Prefs.setLong(ctx, Prefs.FILE_MB, it) }
-        Text(tr("阈值只会停止本应用的记录，不会控制或限制充电。", "Limits only stop recording; this app never controls charging."), style = MaterialTheme.typography.bodySmall)
     }
     Fold(
         tr("特权增强（默认关闭，只读）", "Privileged Mode (Read-only)"),
