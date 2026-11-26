@@ -13,7 +13,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "0.2.0"
+        versionName = "0.3.0"
     }
 
     buildTypes {
@@ -33,10 +33,13 @@ android {
     }
     buildFeatures {
         compose = true
+        aidl = true
     }
 }
 
 dependencies {
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)

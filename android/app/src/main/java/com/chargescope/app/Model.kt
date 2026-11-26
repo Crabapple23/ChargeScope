@@ -1,6 +1,6 @@
 package com.chargescope.app
 
-/** One power_supply node read through root (read-only). */
+/** One power_supply node (or the synthetic "dumpsys" node) read through a privileged channel. */
 data class RootNode(val name: String, val props: Map<String, String>)
 
 /** One sample. Missing values are null, never 0. */
@@ -37,6 +37,10 @@ data class Analysis(
     val headline: String,
     val evidence: List<Evidence>,
     val limitations: List<String>,
+    /** Narrowed-down candidates (never a confirmation). */
+    val candidates: List<String> = emptyList(),
+    /** Stable identity of the result, used to de-duplicate archive entries. Empty = not archivable. */
+    val key: String = "",
 )
 
 data class Metrics(
@@ -48,11 +52,35 @@ data class Metrics(
     val avgTempDeci: Double?,
 )
 
-data class InputInfo(val voltageUv: Long?, val currentUa: Long?, val usbType: String?)
+data class InputInfo(
+    val voltageUv: Long?,
+    val currentUa: Long?,
+    val usbType: String?,
+    /** Charger-advertised ceiling from `dumpsys battery` (not the negotiated value). */
+    val advVoltageUv: Long? = null,
+    val advCurrentUa: Long? = null,
+)
+
+/** Chart data in watts. NaN marks a missing point. */
+data class Series(val batteryW: List<Float>, val inputW: List<Float>, val spanSec: Int)
+
+data class ArchiveEntry(
+    val wallMs: Long,
+    val status: String,
+    val headline: String,
+    val key: String,
+    val evidence: List<String>,
+    val candidates: List<String>,
+    val maxVinV: Double?,
+    val maxInputW: Double?,
+    val maxBatteryW: Double?,
+    val levelPct: Int?,
+    val device: String,
+)
 
 data class UiState(
     val latest: Snapshot? = null,
-    val powerSeries: List<Float> = emptyList(),
+    val series: Series = Series(emptyList(), emptyList(), 0),
     val analysis: Analysis? = null,
     val metrics: Metrics? = null,
     val recording: Boolean = false,

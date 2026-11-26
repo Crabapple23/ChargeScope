@@ -50,8 +50,9 @@ object Collector {
 }
 
 /**
- * Optional root, strictly read-only: one `su` process runs a fixed script that only reads
- * /sys/class/power_supply/<node>/<field>. Nothing is written; no user input reaches the shell.
+ * Privileged read-only channel shared by root (Magisk / KernelSU / APatch via `su`) and Shizuku.
+ * One fixed script is executed; it only reads /sys/class/power_supply/<node>/<field> and
+ * `dumpsys battery`. Nothing is written and no user input reaches the shell.
  */
 object RootScanner {
     class Result(val nodes: List<RootNode>, val error: String?)
@@ -61,10 +62,12 @@ object RootScanner {
             "voltage_max current_max usb_type real_type charge_type temp input_current_limit " +
             "constant_charge_current charge_counter"
 
-    private val SCRIPT = "for d in /sys/class/power_supply/*; do " +
+    internal val SCRIPT = "echo \"#uid=\$(id -u)\"; " +
+        "for d in /sys/class/power_supply/*; do " +
         "echo \"@@\${d##*/}\"; " +
         "for f in $FIELDS; do v=; { read -r v < \"\$d/\$f\"; } 2>/dev/null && echo \"\$f=\$v\"; done; " +
-        "done"
+        "done; " +
+        "echo \"@@dumpsys\"; dumpsys battery 2>/dev/null | sed 's/^ *//; s/: /=/'"
 
     suspend fun scan(timeoutSec: Long = 4): Result = withContext(Dispatchers.IO) {
         try {
@@ -72,7 +75,6 @@ object RootScanner {
             // The script goes through stdin (not `-c`), which every su variant accepts.
             val p = ProcessBuilder("su").redirectErrorStream(false).start()
             p.outputStream.bufferedWriter().use {
-                it.write("echo \"#uid=\$(id -u)\"\n")
                 it.write(SCRIPT + "\n")
                 it.write("exit\n")
             }
@@ -84,19 +86,23 @@ object RootScanner {
                     return@coroutineScope Result(emptyList(), "su 等待超时（请在 Root 管理器弹窗中授权后重试）")
                 }
                 val text = out.await()
-                val uid = text.lineSequence().firstOrNull { it.startsWith("#uid=") }?.substring(5)?.trim()
-                if (uid != null && uid != "0") {
-                    return@coroutineScope Result(emptyList(), "su 未授予 Root 权限（uid=$uid）")
-                }
-                val nodes = parse(text)
-                if (nodes.isEmpty()) {
+                val r = interpret(text, setOf("0"))
+                if (r.error != null && !text.contains("#uid=")) {
                     val why = err.await().trim().take(100)
-                    Result(emptyList(), if (uid == null) "su 被拒绝或未授权" + (if (why.isEmpty()) "" else "：$why") else "未读到任何 power_supply 节点")
-                } else Result(nodes, null)
+                    Result(emptyList(), "su 被拒绝或未授权" + (if (why.isEmpty()) "" else "：$why"))
+                } else r
             }
         } catch (e: Exception) {
             Result(emptyList(), "未检测到可用的 su（未 Root，或未在 Root 管理器中授权）")
         }
+    }
+
+    /** Validates the uid reported by the script and parses its output. */
+    internal fun interpret(text: String, okUids: Set<String>): Result {
+        val uid = text.lineSequence().firstOrNull { it.startsWith("#uid=") }?.substring(5)?.trim()
+        if (uid != null && uid !in okUids) return Result(emptyList(), "未获得所需权限（uid=$uid）")
+        val nodes = parse(text)
+        return if (nodes.isEmpty()) Result(emptyList(), "未读到任何电源节点") else Result(nodes, null)
     }
 
     enum class Provider(val label: String) {
@@ -114,7 +120,7 @@ object RootScanner {
     )
 
     /** Which root manager app is installed (informational only; the call path is the same). */
-    fun detectProvider(ctx: android.content.Context): Provider? {
+    fun detectProvider(ctx: Context): Provider? {
         val pm = ctx.packageManager
         for ((pkg, prov) in PACKAGES) {
             try {
@@ -141,7 +147,10 @@ object RootScanner {
                 props = LinkedHashMap()
             } else {
                 val idx = line.indexOf('=')
-                if (idx > 0) props[line.substring(0, idx)] = line.substring(idx + 1).trim()
+                if (idx > 0) {
+                    val k = line.substring(0, idx).trim().lowercase().replace(' ', '_')
+                    props[k] = line.substring(idx + 1).trim()
+                }
             }
         }
         flush()

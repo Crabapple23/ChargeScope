@@ -50,6 +50,21 @@ class AnalyzerTest {
         assertEquals(Status.NOT_CHARGING, Analyzer.analyze(listOf(snap(plugged = 0))).status)
     }
 
+    @Test fun specTableMatchGivesCandidates() {
+        val node = RootNode(
+            "usb",
+            mapOf("type" to "USB", "voltage_now" to "20000000", "current_now" to "5000000", "online" to "1"),
+        )
+        val a = Analyzer.analyze(listOf(snap(listOf(node))), "samsung")
+        assertEquals(Status.POSSIBLE, a.status)
+        assertTrue(a.candidates.any { "20V/5A" in it })
+    }
+
+    @Test fun dumpsysSectionIsParsed() {
+        val n = RootScanner.parse("@@dumpsys\nAC powered=false\nMax charging voltage=9000000\n")
+        assertEquals("9000000", n[0].props["max_charging_voltage"])
+    }
+
     @Test fun parseRootOutput() {
         val nodes = RootScanner.parse("@@usb\ntype=USB\nonline=1\n@@battery\ncapacity=50\n")
         assertEquals(2, nodes.size)

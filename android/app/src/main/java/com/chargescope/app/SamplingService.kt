@@ -59,7 +59,10 @@ class SamplingService : Service() {
     private fun recordingActive() = job?.isActive == true
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        AppLog.init(applicationContext)
+        Archive.init(applicationContext)
         ensureForeground()
+        AppLog.i("服务指令：${intent?.action ?: "手动开始"}")
         when (intent?.action) {
             ACTION_ARM -> {
                 armed = true

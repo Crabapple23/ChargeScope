@@ -1,12 +1,15 @@
 package com.chargescope.app
 
 import kotlin.math.abs
+import kotlin.math.roundToLong
 
 /**
  * Evidence-based analysis. Rules:
- * - L4: driver explicitly reports a protocol name (needs root-readable sysfs) -> may confirm.
- * - L3: input-side voltage/current -> only "possible".
+ * - L4: driver explicitly reports a protocol name (needs privileged sysfs access) -> may confirm.
+ * - L3: input-side voltage/current, voltage pattern, spec-table match -> only "possible" + candidates.
  * - L2: battery-side power -> reference only, never confirms a protocol.
+ * - L1: device brand -> only narrows candidates.
+ * Spec numbers come from docs (USB PD / UFCS / QC / vendor tables).
  */
 object Analyzer {
 
@@ -54,13 +57,27 @@ object Analyzer {
         var v: Long? = null
         var i: Long? = null
         var type: String? = null
+        var advV: Long? = null
+        var advI: Long? = null
         for (n in s.rootNodes) {
+            if (n.name == "dumpsys") {
+                advV = n.props["max_charging_voltage"]?.trim()?.toLongOrNull()?.takeIf { it in 3_000_000L..50_000_000L }
+                advI = n.props["max_charging_current"]?.trim()?.toLongOrNull()?.takeIf { it > 0 }
+                continue
+            }
             if (!isInputNode(n)) continue
-            if (v == null) v = n.props["voltage_now"]?.trim()?.toLongOrNull()?.takeIf { it in 3_000_000L..25_000_000L }
+            if (v == null) v = n.props["voltage_now"]?.trim()?.toLongOrNull()?.takeIf { it in 3_000_000L..50_000_000L }
             if (i == null) i = n.props["current_now"]?.trim()?.toLongOrNull()
             if (type == null) type = (n.props["usb_type"] ?: n.props["real_type"])?.let { activeToken(it) }
         }
-        return InputInfo(v, i, type)
+        return InputInfo(v, i, type, advV, advI)
+    }
+
+    /** Input-side power in watts, when both voltage and current are readable. */
+    fun inputPowerW(inp: InputInfo): Double? {
+        val v = inp.voltageUv ?: return null
+        val i = inp.currentUa ?: return null
+        return v.toDouble() * abs(i.toDouble()) / 1e12
     }
 
     /** Battery current in mA (absolute). Some devices report mA instead of uA. */
@@ -77,18 +94,135 @@ object Analyzer {
         return v * i / 1000.0
     }
 
-    fun analyze(window: List<Snapshot>): Analysis {
+    // ---- Spec table (from the protocol reference document) -------------------------------
+
+    private data class Profile(val brand: String, val name: String, val v: Double, val a: Double)
+
+    private val PROFILES = listOf(
+        Profile("PD", "USB PD 9V/3A (27W)", 9.0, 3.0),
+        Profile("PD", "USB PD 15V/3A (45W)", 15.0, 3.0),
+        Profile("PD", "USB PD 20V/3A (60W)", 20.0, 3.0),
+        Profile("PD", "USB PD 20V/5A (100W)", 20.0, 5.0),
+        Profile("PD", "USB PD EPR 28V/5A (140W)", 28.0, 5.0),
+        Profile("PD", "USB PD EPR 36V/5A (180W)", 36.0, 5.0),
+        Profile("PD", "USB PD EPR 48V/5A (240W)", 48.0, 5.0),
+        Profile("UFCS", "UFCS 33W (11V/3A)", 11.0, 3.0),
+        Profile("UFCS", "UFCS 44W (11V/4A)", 11.0, 4.0),
+        Profile("UFCS", "UFCS 65W (10V/6.5A)", 10.0, 6.5),
+        Profile("UFCS", "UFCS 65W (20V/3.25A)", 20.0, 3.25),
+        Profile("QC", "QC 2.0/3.0 18W (9V/2A)", 9.0, 2.0),
+        Profile("QC", "QC 2.0/3.0 36W (12V/3A)", 12.0, 3.0),
+        Profile("小米", "小米 HyperCharge 33W (11V/3A)", 11.0, 3.0),
+        Profile("小米", "小米 HyperCharge 67W (11V/6.1A)", 11.0, 6.1),
+        Profile("小米", "小米 HyperCharge 67W (20V/3.25A)", 20.0, 3.25),
+        Profile("小米", "小米 HyperCharge 90W (20V/4.5A)", 20.0, 4.5),
+        Profile("小米", "小米 HyperCharge 120W (20V/6A)", 20.0, 6.0),
+        Profile("OPPO", "OPPO VOOC 30W (5V/6A)", 5.0, 6.0),
+        Profile("OPPO", "OPPO SuperVOOC 65W (10V/6.5A)", 10.0, 6.5),
+        Profile("OPPO", "OPPO SuperVOOC 80W (11V/7.3A)", 11.0, 7.3),
+        Profile("OPPO", "OPPO SuperVOOC 100W (11V/9.1A)", 11.0, 9.1),
+        Profile("OPPO", "OPPO SuperVOOC 150W (20V/7.5A)", 20.0, 7.5),
+        Profile("OPPO", "OPPO SuperVOOC 240W (20V/12A)", 20.0, 12.0),
+        Profile("vivo", "vivo FlashCharge 44W (11V/4A)", 11.0, 4.0),
+        Profile("vivo", "vivo FlashCharge 66W (11V/6A)", 11.0, 6.0),
+        Profile("vivo", "vivo FlashCharge 80W (20V/4A)", 20.0, 4.0),
+        Profile("vivo", "vivo FlashCharge 120W (20V/6A)", 20.0, 6.0),
+        Profile("vivo", "vivo FlashCharge 200W (20V/10A)", 20.0, 10.0),
+        Profile("华为", "华为 FCP 18W (9V/2A)", 9.0, 2.0),
+        Profile("华为", "华为 SCP 22.5W (4.5V/5A)", 4.5, 5.0),
+        Profile("华为", "华为 SCP 22.5W (10V/2.25A)", 10.0, 2.25),
+        Profile("华为", "华为 SCP 40W (10V/4A)", 10.0, 4.0),
+        Profile("华为", "华为 SCP 66W (11V/6A)", 11.0, 6.0),
+        Profile("华为", "华为 SCP 88W (20V/4.4A)", 20.0, 4.4),
+        Profile("华为", "华为 SCP 100W (20V/5A)", 20.0, 5.0),
+        Profile("荣耀", "荣耀 SuperCharge 66W (11V/6A)", 11.0, 6.0),
+        Profile("荣耀", "荣耀 SuperCharge 80W (20V/4A)", 20.0, 4.0),
+        Profile("荣耀", "荣耀 SuperCharge 100W (20V/5A)", 20.0, 5.0),
+        Profile("三星", "三星 AFC 15W (9V/1.67A)", 9.0, 1.67),
+        Profile("三星", "三星 PPS 25W (9V/2.77A)", 9.0, 2.77),
+        Profile("三星", "三星 PPS 45W (11V/4.05A)", 11.0, 4.05),
+        Profile("三星", "三星 PPS 45W (9V/5A)", 9.0, 5.0),
+        Profile("魅族/努比亚", "魅族 Super mCharge 80W (20V/4A)", 20.0, 4.0),
+        Profile("魅族/努比亚", "红魔 NeoCharger 165W (20V/8.25A)", 20.0, 8.25),
+    )
+
+    private val BRAND_PROTOCOLS = mapOf(
+        "小米" to "HyperCharge / Mi PPS（魔改 PD PPS，电流上限放宽至 6A 左右）",
+        "OPPO" to "VOOC / SuperVOOC（私有加密握手）",
+        "vivo" to "FlashCharge（私有通信协议，新款部分兼容 PPS/UFCS）",
+        "华为" to "FCP / SCP（部分机型支持 UFCS）",
+        "荣耀" to "Honor SuperCharge（SCP 演进，兼容 PPS/UFCS）",
+        "三星" to "AFC / SFC（SFC 完全遵循 USB PD 3.0 PPS）",
+        "魅族/努比亚" to "Super mCharge / NeoCharger（大电流 PPS）",
+    )
+
+    fun brandOf(maker: String?): String? {
+        val m = maker?.lowercase() ?: return null
+        return when {
+            "xiaomi" in m || "redmi" in m || "poco" in m -> "小米"
+            "oppo" in m || "oneplus" in m || "realme" in m -> "OPPO"
+            "vivo" in m || "iqoo" in m -> "vivo"
+            "huawei" in m -> "华为"
+            "honor" in m -> "荣耀"
+            "samsung" in m -> "三星"
+            "meizu" in m || "nubia" in m || "zte" in m -> "魅族/努比亚"
+            else -> null
+        }
+    }
+
+    private fun match(v: Double, a: Double, brand: String?): List<String> =
+        PROFILES.filter { abs(v - it.v) / it.v <= 0.06 && abs(a - it.a) / it.a <= 0.10 }
+            .sortedByDescending { it.brand == brand }
+            .map { (if (it.brand == brand) "★" else "") + it.name }
+
+    /** Observes the input-voltage pattern: fixed steps (PD/QC2/AFC) vs adjustable (PPS/QC3/UFCS). */
+    private fun voltagePattern(vols: List<Long>, ev: MutableList<Evidence>, cand: MutableSet<String>) {
+        val hv = vols.filter { it > 5_500_000L }
+        if (hv.isEmpty()) return
+        val fixed = doubleArrayOf(9.0, 12.0, 15.0, 20.0, 28.0, 36.0, 48.0)
+        val volts = hv.map { it / 1e6 }
+        val levels = volts.map { (it * 10).roundToLong() / 10.0 }.distinct().sorted()
+        ev += Evidence(3, "观察到的高压档位：" + levels.joinToString(" / ") { "%.1fV".format(it) })
+        val allFixed = volts.all { v -> fixed.any { abs(v - it) <= 0.35 } }
+        cand += if (allFixed) {
+            "USB PD 固定档 / QC 2.0 / AFC（电压停在固定档位）"
+        } else {
+            "PPS / QC 3.0 / UFCS / 厂商私有（出现非标准档位或连续调压）"
+        }
+        val steps = ArrayList<Double>()
+        for (i in 1 until vols.size) {
+            val d = abs(vols[i] - vols[i - 1]) / 1000.0
+            if (d >= 10.0 && d < 1000.0) steps += d
+        }
+        if (steps.size >= 2) {
+            val m = steps.min()
+            if (m <= 60.0) {
+                ev += Evidence(3, "调压步进最小约 %.0f mV，接近 PPS / UFCS 的 20 mV 量级（受采样精度影响）".format(m))
+                cand += "USB PD PPS / UFCS"
+            } else if (m in 150.0..260.0) {
+                ev += Evidence(3, "调压步进最小约 %.0f mV，接近 QC 3.0 的 200 mV 量级".format(m))
+                cand += "QC 3.0"
+            }
+        }
+    }
+
+    fun analyze(window: List<Snapshot>, maker: String? = null): Analysis {
         val last = window.lastOrNull()
             ?: return Analysis(Status.UNKNOWN, "暂无数据", emptyList(), emptyList())
         val limits = mutableListOf(
             "设备支持、充电器支持、当前实际协商是三个不同概念，本工具只报告当前可观测的证据。",
             "功率、温度、SOC 变化不能单独确认任何快充协议。",
+            "实际握手功率还受线缆（>3A 需 5A E-Marker）、充电器档位和温度限制。",
         )
         if (!last.isPlugged) {
             return Analysis(Status.NOT_CHARGING, "未连接充电器", emptyList(), limits)
         }
 
         val evidence = mutableListOf<Evidence>()
+        val candidates = LinkedHashSet<String>()
+        val brand = brandOf(maker)
+
+        // L4: driver-reported protocol names.
         val l4 = LinkedHashMap<String, Cls>()
         for (n in last.rootNodes) {
             if (!isInputNode(n)) continue
@@ -102,51 +236,86 @@ object Analyzer {
             }
         }
 
-        var maxVin = 0L
-        for (s in window.takeLast(15)) {
-            val vin = input(s).voltageUv ?: continue
-            if (vin > maxVin) maxVin = vin
-        }
+        // L3: input side observations over the recent window.
+        val inputs = window.takeLast(60).map { input(it) }
+        val vols = inputs.mapNotNull { it.voltageUv }
+        val maxVin = vols.maxOrNull() ?: 0L
         val inp = input(last)
         if (inp.voltageUv != null) {
-            val p = inp.currentUa?.let { inp.voltageUv * abs(it) / 1_000_000_000.0 }
+            val p = inputPowerW(inp)
             evidence += Evidence(
                 3,
                 "输入侧电压 %.2f V".format(inp.voltageUv / 1e6) +
                     (inp.currentUa?.let { "，电流 %.0f mA".format(abs(it) / 1000.0) } ?: "") +
-                    (p?.let { "，约 %.1f W".format(it / 1000.0) } ?: ""),
+                    (p?.let { "，约 %.1f W".format(it) } ?: ""),
             )
         }
+        val adv = inputs.lastOrNull { it.advVoltageUv != null }
+        val advV = adv?.advVoltageUv
+        val advI = adv?.advCurrentUa
+        if (advV != null) {
+            evidence += Evidence(
+                3,
+                "充电器宣告上限（dumpsys）：最大电压 %.1f V".format(advV / 1e6) +
+                    (advI?.let { "，最大电流 %.2f A".format(it / 1e6) } ?: "") + "（上限值，不代表当前协商结果）",
+            )
+        }
+        voltagePattern(vols, evidence, candidates)
+
+        // Spec-table match, using the sample with the highest input power.
+        var bestP = 0.0; var bestV = 0.0; var bestI = 0.0
+        for (x in inputs) {
+            val v = x.voltageUv ?: continue
+            val i = x.currentUa ?: continue
+            val p = v.toDouble() * abs(i.toDouble())
+            if (p > bestP) { bestP = p; bestV = v / 1e6; bestI = abs(i) / 1e6 }
+        }
+        val matched = when {
+            bestP > 0 && bestV > 5.5 && bestI >= 0.5 -> match(bestV, bestI, brand)
+            advV != null && advV > 5_500_000L && advI != null -> match(advV / 1e6, advI / 1e6, brand).map { "$it（宣告值）" }
+            else -> emptyList()
+        }
+        if (matched.isNotEmpty()) {
+            evidence += Evidence(3, "电压/电流与规格表档位接近：" + matched.take(4).joinToString("、") + "（仅缩小范围）")
+            candidates += matched.take(6)
+        }
+
+        // L2 / L1 references.
         powerMw(last)?.let {
             if (it >= 15_000.0) {
                 evidence += Evidence(2, "电池侧估算功率约 %.1f W（仅参考，不能确认协议）".format(it / 1000.0))
             }
         }
-
-        if (last.rootNodes.isEmpty()) {
-            limits += "未启用 Root 或无法读取 sysfs：无 Root 时只有电池侧数据，无法识别协议。"
+        if (brand != null) {
+            evidence += Evidence(1, "本机品牌 $brand，常见私有协议：${BRAND_PROTOCOLS[brand]}（仅缩小范围）")
         }
+        if (last.rootNodes.isEmpty()) {
+            limits += "未启用 Root / Shizuku 或无法读取 sysfs：只有电池侧数据，无法识别协议。"
+        }
+        if (vols.size >= 2) limits += "电压步进判断受采样间隔和驱动上报精度影响，仅作参考。"
 
+        val cl = candidates.toList()
         return when {
             l4.size > 1 -> Analysis(
                 Status.CONFLICT,
                 "不同节点报告了不同协议：" + l4.values.joinToString(" / ") { it.label },
-                evidence, limits,
+                evidence, limits, cl, "X:" + l4.values.joinToString("+") { it.label },
             )
             l4.size == 1 -> {
                 val c = l4.values.first()
                 Analysis(
                     Status.CONFIRMED,
                     if (c.fast) "驱动报告：${c.label}" else "驱动报告：${c.label}（非快充）",
-                    evidence, limits,
+                    evidence, limits, cl, "C:" + c.label,
                 )
             }
-            maxVin > 5_500_000L -> Analysis(
+            maxVin > 5_500_000L || matched.isNotEmpty() -> Analysis(
                 Status.POSSIBLE,
-                "输入侧出现 %.1f V 高压，疑似发生快充协商，但无法确定具体协议".format(maxVin / 1e6),
-                evidence, limits,
+                (if (maxVin > 5_500_000L) "输入侧出现 %.1f V 高压，疑似快充协商".format(maxVin / 1e6) else "充电器宣告支持高压") +
+                    (if (cl.isNotEmpty()) "；候选：" + cl.take(2).joinToString("；") else "，但无法确定具体协议"),
+                evidence, limits, cl, "P:" + (cl.firstOrNull() ?: "hv"),
             )
-            else -> Analysis(Status.UNKNOWN, "没有足够证据识别协议", evidence, limits)
+            else -> Analysis(Status.UNKNOWN, "没有足够证据识别协议", evidence, limits, cl)
         }
     }
 
@@ -155,7 +324,11 @@ object Analyzer {
         var pSum = 0.0; var pN = 0; var peak: Double? = null
         var tSum = 0.0; var tN = 0
         for (s in list) {
-            powerMw(s)?.let { pSum += it; pN++; if (peak == null || it > peak!!) peak = it }
+            powerMw(s)?.let {
+                pSum += it; pN++
+                val pk = peak
+                if (pk == null || it > pk) peak = it
+            }
             s.tempDeci?.let { tSum += it; tN++ }
         }
         val first = list.firstOrNull { it.levelPct != null }

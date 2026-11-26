@@ -1,0 +1,170 @@
+package com.chargescope.app
+
+import android.content.Context
+import android.os.Build
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/** Small append-only event log (capped) used for the diagnostic export. */
+object AppLog {
+    private const val MAX_BYTES = 256 * 1024
+    private var file: File? = null
+
+    fun init(ctx: Context) {
+        if (file == null) file = File(ctx.applicationContext.filesDir, "events.log")
+    }
+
+    private fun ts(t: Long = System.currentTimeMillis()) =
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(t))
+
+    @Synchronized
+    fun i(msg: String) {
+        val f = file ?: return
+        try {
+            if (f.length() > MAX_BYTES) {
+                val keep = f.readText().takeLast(MAX_BYTES / 2)
+                f.writeText(keep.substringAfter('\n', keep))
+            }
+            f.appendText("${ts()} $msg\n")
+        } catch (_: Exception) {
+        }
+    }
+
+    @Synchronized
+    fun read(): String = try { file?.takeIf { it.exists() }?.readText() ?: "" } catch (_: Exception) { "" }
+
+    @Synchronized
+    fun clear() { try { file?.delete() } catch (_: Exception) {} }
+
+    fun time(t: Long) = ts(t)
+}
+
+/** Persisted protocol-identification archive (JSON lines, newest last, capped, clearable). */
+object Archive {
+    private const val MAX = 200
+    private var file: File? = null
+    private val _items = MutableStateFlow<List<ArchiveEntry>>(emptyList())
+    val items = _items.asStateFlow()
+
+    @Synchronized
+    fun init(ctx: Context) {
+        if (file != null) return
+        val f = File(ctx.applicationContext.filesDir, "archive.jsonl")
+        file = f
+        if (!f.exists()) return
+        val list = ArrayList<ArchiveEntry>()
+        try {
+            f.forEachLine { line ->
+                if (line.isBlank()) return@forEachLine
+                try { list += fromJson(JSONObject(line)) } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {
+        }
+        _items.value = list.takeLast(MAX)
+    }
+
+    @Synchronized
+    fun upsert(e: ArchiveEntry) {
+        val cur = _items.value.toMutableList()
+        val idx = cur.indexOfFirst { it.wallMs == e.wallMs }
+        if (idx >= 0) cur[idx] = e else cur += e
+        _items.value = cur.takeLast(MAX)
+        persist()
+    }
+
+    @Synchronized
+    fun clear() {
+        _items.value = emptyList()
+        try { file?.delete() } catch (_: Exception) {}
+    }
+
+    private fun persist() {
+        val f = file ?: return
+        try {
+            f.writeText(_items.value.joinToString("\n") { toJson(it).toString() } + "\n")
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun arr(l: List<String>) = JSONArray().also { a -> l.forEach { a.put(it) } }
+    private fun strs(a: JSONArray?): List<String> = if (a == null) emptyList() else List(a.length()) { a.getString(it) }
+    private fun dbl(o: JSONObject, k: String): Double? = if (o.has(k) && !o.isNull(k)) o.getDouble(k) else null
+
+    private fun toJson(e: ArchiveEntry) = JSONObject().apply {
+        put("t", e.wallMs); put("status", e.status); put("headline", e.headline); put("key", e.key)
+        put("evidence", arr(e.evidence)); put("candidates", arr(e.candidates))
+        e.maxVinV?.let { put("maxVinV", it) }
+        e.maxInputW?.let { put("maxInputW", it) }
+        e.maxBatteryW?.let { put("maxBatteryW", it) }
+        e.levelPct?.let { put("level", it) }
+        put("device", e.device)
+    }
+
+    private fun fromJson(o: JSONObject) = ArchiveEntry(
+        wallMs = o.getLong("t"),
+        status = o.getString("status"),
+        headline = o.getString("headline"),
+        key = o.optString("key"),
+        evidence = strs(o.optJSONArray("evidence")),
+        candidates = strs(o.optJSONArray("candidates")),
+        maxVinV = dbl(o, "maxVinV"),
+        maxInputW = dbl(o, "maxInputW"),
+        maxBatteryW = dbl(o, "maxBatteryW"),
+        levelPct = if (o.has("level")) o.getInt("level") else null,
+        device = o.optString("device"),
+    )
+}
+
+/** Builds the plain-text diagnostic report for export. Contains no personal identifiers. */
+object Report {
+    fun build(ctx: Context, ui: UiState): String {
+        val sb = StringBuilder(4096)
+        fun line(s: String = "") { sb.append(s).append('\n') }
+        line("# ChargeScope 诊断日志")
+        line("生成时间：" + AppLog.time(System.currentTimeMillis()))
+        line("应用版本：0.3.0")
+        line("设备：${Build.MANUFACTURER} ${Build.MODEL}  Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+        if (Build.VERSION.SDK_INT >= 31) line("SoC：${Build.SOC_MODEL}")
+        line()
+        line("## 设置")
+        line("特权通道：" + when (Prefs.privMode(ctx)) { 1 -> "Root"; 2 -> "Shizuku"; else -> "关闭" })
+        line("Shizuku 状态：" + ShizukuBridge.state().label)
+        line("采样间隔：${Prefs.intervalMs(ctx)} ms；自动记录：${Prefs.autoRecord(ctx)}")
+        line("阈值：温度 ${Prefs.long(ctx, Prefs.TEMP, 45L)}°C，时长 ${Prefs.long(ctx, Prefs.MINUTES, 120L)} 分钟，" +
+            "电量 ${Prefs.long(ctx, Prefs.SOC, 0L)}%，文件 ${Prefs.long(ctx, Prefs.FILE_MB, 8L)} MB")
+        ui.rootError?.let { line("特权通道错误：$it") }
+        line()
+        val s = ui.latest
+        line("## 最新样本")
+        if (s == null) line("无") else {
+            line("电量 ${s.levelPct ?: "—"}%  状态码 ${s.status ?: "—"}  连接 ${s.plugged}  健康码 ${s.health ?: "—"}")
+            line("电压 ${s.voltageMv ?: "—"} mV  温度 ${s.tempDeci ?: "—"} (0.1°C)  电流 ${s.currentUa ?: "—"} µA  平均电流 ${s.currentAvgUa ?: "—"} µA")
+            Analyzer.powerMw(s)?.let { line("电池侧估算功率 %.0f mW".format(it)) }
+            for (n in s.rootNodes) line("[${n.name}] " + n.props.entries.joinToString(" ") { "${it.key}=${it.value}" })
+        }
+        line()
+        ui.analysis?.let { a ->
+            line("## 当前识别结果：${a.status.label}")
+            line(a.headline)
+            a.evidence.sortedByDescending { it.level }.forEach { line("L${it.level} ${it.text}") }
+            if (a.candidates.isNotEmpty()) line("候选：" + a.candidates.joinToString("；"))
+            a.limitations.forEach { line("限制：$it") }
+            line()
+        }
+        line("## 识别存档（${Archive.items.value.size} 条）")
+        for (e in Archive.items.value) {
+            line("${AppLog.time(e.wallMs)} [${e.status}] ${e.headline}  电量 ${e.levelPct ?: "—"}%")
+            line("    峰值：输入电压 ${e.maxVinV?.let { "%.1f V".format(it) } ?: "—"}，输入功率 ${e.maxInputW?.let { "%.1f W".format(it) } ?: "—"}，电池侧功率 ${e.maxBatteryW?.let { "%.1f W".format(it) } ?: "—"}")
+        }
+        line()
+        line("## 事件日志")
+        sb.append(AppLog.read())
+        return sb.toString()
+    }
+}
