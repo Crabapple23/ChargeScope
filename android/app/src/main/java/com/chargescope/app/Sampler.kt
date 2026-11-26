@@ -69,6 +69,12 @@ object Prefs {
 
     fun oledBlack(c: Context): Boolean = sp(c).getBoolean("oled_black", false)
     fun setOledBlack(c: Context, v: Boolean) = sp(c).edit().putBoolean("oled_black", v).apply()
+
+    fun onboardingDone(c: Context): Boolean = sp(c).getBoolean("onboarding_done", false)
+    fun setOnboardingDone(c: Context, v: Boolean) = sp(c).edit().putBoolean("onboarding_done", v).apply()
+
+    fun exportTreeUri(c: Context): String? = sp(c).getString("export_tree_uri", null)
+    fun setExportTreeUri(c: Context, v: String?) = sp(c).edit().putString("export_tree_uri", v).apply()
 }
 
 /**

@@ -19,6 +19,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -113,7 +114,11 @@ val LocalIsEn = compositionLocalOf { false }
 fun tr(zh: String, en: String): String = if (LocalIsEn.current) en else zh
 
 @Composable
-fun SettingsScreen(prefs: AppPrefs, onBack: () -> Unit) {
+fun SettingsScreen(
+    prefs: AppPrefs,
+    onBack: () -> Unit,
+    onOpenOnboarding: () -> Unit = {},
+) {
     val ctx = LocalContext.current
     val updateUrl = if (prefs.updateSource == 1) AppSettings.ACTIONS_URL else AppSettings.RELEASES_URL
 
@@ -307,6 +312,10 @@ fun SettingsScreen(prefs: AppPrefs, onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                OutlinedButton(
+                    onClick = onOpenOnboarding,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(tr("重新查看首次引导与权限", "Reopen Setup Guide & Permissions")) }
             }
         }
     }

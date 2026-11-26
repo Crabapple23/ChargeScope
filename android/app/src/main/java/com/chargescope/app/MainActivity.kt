@@ -2,7 +2,6 @@ package com.chargescope.app
 
 import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -115,13 +114,10 @@ class MainActivity : ComponentActivity() {
             AppLog.init(applicationContext)
             Archive.init(applicationContext)
         }
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        // Re-arm auto-record after onboarding (service may have been killed); allowed because we are in the foreground.
+        if (Prefs.onboardingDone(this) && Prefs.autoRecord(this)) {
+            SamplingService.send(this, SamplingService.ACTION_ARM)
         }
-        // Re-arm auto-record (service may have been killed); allowed because we are in the foreground.
-        if (Prefs.autoRecord(this)) SamplingService.send(this, SamplingService.ACTION_ARM)
         // Live view while the UI is visible; the background service takes over when recording.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -155,8 +151,10 @@ private val NICE_STEPS = floatArrayOf(5f, 10f, 20f, 30f, 50f, 70f, 100f, 150f, 2
 @Composable
 private fun App() {
     val prefs by AppSettings.prefs.collectAsState()
+    val ctx = LocalContext.current
     var tab by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
+    var showOnboarding by remember { mutableStateOf(!Prefs.onboardingDone(ctx)) }
     var backProgress by remember { mutableFloatStateOf(0f) }
     var backEdge by remember { mutableIntStateOf(0) }
     var lastProtocolTapMs by remember { mutableLongStateOf(0L) }
@@ -166,7 +164,6 @@ private fun App() {
         2 -> true
         else -> isSystemInDarkTheme()
     }
-    val ctx = LocalContext.current
     val baseColors = when {
         prefs.dynamicColor && Build.VERSION.SDK_INT >= 31 ->
             if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
@@ -208,8 +205,11 @@ private fun App() {
 
     CompositionLocalProvider(LocalDensity provides scaledDensity, LocalIsEn provides prefs.isEn) {
         MaterialTheme(colorScheme = colors) {
-            BackHandler(enabled = showSettings && !prefs.predictiveBack) { showSettings = false }
-            PredictiveBackHandler(enabled = showSettings && prefs.predictiveBack) { progress ->
+            BackHandler(enabled = showOnboarding) {
+                // Prevent accidental dismissal of the first-launch guide via back gesture.
+            }
+            BackHandler(enabled = !showOnboarding && showSettings && !prefs.predictiveBack) { showSettings = false }
+            PredictiveBackHandler(enabled = !showOnboarding && showSettings && prefs.predictiveBack) { progress ->
                 try {
                     progress.collect { ev ->
                         backProgress = ev.progress
@@ -292,8 +292,30 @@ private fun App() {
                                 }
                             },
                     ) {
-                        SettingsScreen(prefs = prefs, onBack = { showSettings = false })
+                        SettingsScreen(
+                            prefs = prefs,
+                            onBack = { showSettings = false },
+                            onOpenOnboarding = {
+                                showSettings = false
+                                showOnboarding = true
+                            },
+                        )
                     }
+                }
+                AnimatedVisibility(
+                    visible = showOnboarding,
+                    enter = fadeIn(tween(180)),
+                    exit = fadeOut(tween(180)),
+                ) {
+                    OnboardingScreen(
+                        onFinish = {
+                            Prefs.setOnboardingDone(ctx, true)
+                            showOnboarding = false
+                            if (Prefs.autoRecord(ctx) && hasNotificationPermission(ctx)) {
+                                SamplingService.send(ctx, SamplingService.ACTION_ARM)
+                            }
+                        },
+                    )
                 }
             }
         }
@@ -392,9 +414,18 @@ private fun RealtimeTab() {
         }
     }
     ui.notice?.let { n -> Section(tr("提示", "Notice")) { Text(n) } }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        SamplingService.send(ctx, null)
+    }
     Button(
         onClick = {
-            SamplingService.send(ctx, if (ui.recording) SamplingService.ACTION_STOP_REC else null)
+            if (ui.recording) {
+                SamplingService.send(ctx, SamplingService.ACTION_STOP_REC)
+            } else if (Build.VERSION.SDK_INT >= 33 && !hasNotificationPermission(ctx)) {
+                notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                SamplingService.send(ctx, null)
+            }
         },
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -877,6 +908,12 @@ private fun DataTab() {
         }
     }
 
+    val autoNotifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        auto = true
+        Prefs.setAutoRecord(ctx, true)
+        SamplingService.send(ctx, SamplingService.ACTION_ARM)
+    }
+
     Fold(tr("采样间隔", "Sampling Interval"), tr("${interval / 1000} 秒", "${interval / 1000}s")) {
         Chips(INTERVAL_OPTS, interval) { interval = it; Prefs.setIntervalMs(ctx, it) }
     }
@@ -884,9 +921,13 @@ private fun DataTab() {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(tr("连接充电器时自动开始，拔出后停止", "Auto-start on plug-in, stop on unplug"), Modifier.weight(1f))
             Switch(checked = auto, onCheckedChange = {
-                auto = it
-                Prefs.setAutoRecord(ctx, it)
-                SamplingService.send(ctx, if (it) SamplingService.ACTION_ARM else SamplingService.ACTION_DISARM)
+                if (it && Build.VERSION.SDK_INT >= 33 && !hasNotificationPermission(ctx)) {
+                    autoNotifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    auto = it
+                    Prefs.setAutoRecord(ctx, it)
+                    SamplingService.send(ctx, if (it) SamplingService.ACTION_ARM else SamplingService.ACTION_DISARM)
+                }
             })
         }
         Text(tr("开启后会常驻一条低优先级通知（空闲时不采样）。系统重启后需打开一次应用以恢复。", "Shows a low-priority notification while idle (no sampling). Open the app once after reboot to re-arm."), style = MaterialTheme.typography.bodySmall)
