@@ -235,6 +235,6 @@ object Report {
             line("## 深度扫描结果")
             sb.append(deep).append('\n')
         }
-        return sb.toString()
+        return sb.toString().replace("\u0000", "")
     }
 }

@@ -61,8 +61,8 @@ object Analyzer {
         return n.props["online"] != "0" && n.props["present"] != "0"
     }
 
-    private val VBUS_KEYS = arrayOf("vbus_now", "sc_bus_voltage", "ti_bus_voltage", "bus_voltage")
-    private val IBUS_KEYS = arrayOf("ibus_now", "sc_bus_current", "ti_bus_current", "bus_current")
+    private val VBUS_KEYS = arrayOf("vbus_now", "bq2597x_bus_voltage", "sc_bus_voltage", "ti_bus_voltage", "bus_voltage")
+    private val IBUS_KEYS = arrayOf("ibus_now", "bq2597x_bus_current", "sc_bus_current", "ti_bus_current", "bus_current")
 
     private fun toMicroVolts(raw: Long?): Long? = when {
         raw == null -> null
@@ -84,6 +84,8 @@ object Analyzer {
     fun input(s: Snapshot): InputInfo {
         var v: Long? = null
         var i: Long? = null
+        var fallbackV: Long? = null
+        var fallbackI: Long? = null
         var type: String? = null
         var advV: Long? = null
         var advI: Long? = null
@@ -107,11 +109,22 @@ object Analyzer {
                 }
             }
             if (!isInputNode(n)) continue
-            if (v == null) v = toMicroVolts(n.props["voltage_now"]?.trim()?.toLongOrNull())
-            if (i == null) i = toMicroAmps(n.props["current_now"]?.trim()?.toLongOrNull())
-            if (type == null) type = (n.props["usb_type"] ?: n.props["real_type"])?.let { activeToken(it) }
+            val isUcsi = n.name.startsWith("ucsi", ignoreCase = true)
+            val nv = toMicroVolts(n.props["voltage_now"]?.trim()?.toLongOrNull())
+            val ni = toMicroAmps(n.props["current_now"]?.trim()?.toLongOrNull())
+            // Prefer real `usb` node readings over `ucsi-*` (which often reports requested PDO/limit).
+            if (isUcsi) {
+                if (fallbackV == null) fallbackV = nv
+                if (fallbackI == null) fallbackI = ni
+            } else {
+                if (v == null) v = nv
+                if (i == null) i = ni
+            }
+            if (type == null || n.name == "usb") {
+                (n.props["usb_type"] ?: n.props["real_type"])?.let { activeToken(it) }?.let { type = it }
+            }
         }
-        return InputInfo(v, i, type, advV, advI)
+        return InputInfo(v ?: fallbackV, i ?: fallbackI, type, advV, advI)
     }
 
     /** Input-side power in watts, when both voltage and current are readable. */
@@ -135,13 +148,15 @@ object Analyzer {
         return v * i / 1000.0
     }
 
-    /** Battery health percentage from sysfs `soh` or `charge_full / charge_full_design` (null if unavailable). */
+    /** Battery health percentage: prefer fuel-gauge `soh` across battery/vendor nodes, else `charge_full / design`. */
     fun batteryHealthPct(s: Snapshot): Int? {
         var full: Long? = null
         var design: Long? = null
         for (n in s.rootNodes) {
             val t = n.props["type"]?.uppercase()
-            if (t != "BATTERY" && n.name != "battery" && n.name != "bms") continue
+            val isBat = t == "BATTERY" || n.name == "battery" || n.name == "bms" ||
+                n.name == "qcom-battery" || n.name == "xm_power" || n.name == "oplus_chg"
+            if (!isBat) continue
             n.props["soh"]?.trim()?.toIntOrNull()?.takeIf { it in 1..100 }?.let { return it }
             if (full == null) full = n.props["charge_full"]?.trim()?.toLongOrNull()?.takeIf { it > 0 }
             if (design == null) design = n.props["charge_full_design"]?.trim()?.toLongOrNull()?.takeIf { it > 0 }
@@ -223,6 +238,7 @@ object Analyzer {
     )
 
     private val PROTOCOL_SPECS = mapOf(
+        "小米 HyperCharge / Mi PPS" to "小米澎湃秒充（底层基于魔改 USB PD PPS + 私有加密认证）：典型档位 33W (11V/3A)、67W (11V/6.1A 或 20V/3.25A)、90W (20V/4.5A)、120W (20V/6A)；需原厂或获授权 6A 线缆。",
         "SuperVOOC" to "典型档位：10V/6.5A (65W)、11V/7.3A (80W)、11V/9.1A (100W)、20V/7.5A (150W)、20V/12A (240W)；串联双电芯 + 电荷泵分压；私有加密握手，需原厂/认证大电流线缆。",
         "VOOC" to "典型档位：5V/4A (20W)、5V/6A (30W) 低压大电流直充；需支持大电流的专用线缆。",
         "Warp Charge" to "VOOC 体系演进，典型档位：5V/6A (30W)、10V/6.5A (65W)；需原厂/认证大电流线缆。",
@@ -302,10 +318,14 @@ object Analyzer {
         }
     }
 
+    private val UNIVERSAL_BRANDS = setOf("PD", "UFCS", "QC")
+
     private fun match(v: Double, a: Double, brand: String?, suffix: String = ""): List<String> {
         val preferred = ArrayList<String>(4)
         val others = ArrayList<String>(4)
         for (p in PROFILES) {
+            // Do not match another phone maker's proprietary protocol (e.g. Samsung AFC on a Xiaomi phone).
+            if (brand != null && p.brand !in UNIVERSAL_BRANDS && p.brand != brand) continue
             if (abs(v - p.v) / p.v <= 0.06 && abs(a - p.a) / p.a <= 0.10) {
                 if (p.brand == brand) preferred += "★" + p.name + suffix
                 else others += p.name + suffix
@@ -398,19 +418,27 @@ object Analyzer {
                 continue
             }
             val verified = n.props["pd_verifed"] ?: n.props["pd_verified"] ?: n.props["pd_authenticated"]
-            if (verified == "1") {
-                evidence += Evidence(4, "${n.name}：已通过厂商 PPS 加密认证（Mi PPS / HyperCharge）")
-                l4["PD"] = Cls("USB PD PPS", "PD", true, 1)
-                candidates += "★小米 HyperCharge / Mi PPS（已认证）"
+            val apdoMax = (n.props["apdo_max"] ?: n.props["power_max"])?.trim()?.toIntOrNull()?.takeIf { it > 0 }
+            val qct = n.props["quick_charge_type"]?.trim()?.toIntOrNull()?.takeIf { it > 0 }
+            val svid = n.props["adapter_svid"]?.trim()?.lowercase()
+            if (apdoMax != null) {
+                evidence += Evidence(4, "${n.name}/apdo_max = ${apdoMax}W（驱动报告 APDO 最大功率）")
             }
-            n.props["apdo_max"]?.trim()?.toIntOrNull()?.takeIf { it > 0 }?.let { w ->
-                evidence += Evidence(4, "${n.name}/apdo_max = ${w}W（驱动报告 APDO 最大功率）")
+            if (svid == "2717") {
+                evidence += Evidence(4, "${n.name}/adapter_svid = 0x2717（小米官方 USB-IF 厂商 ID）")
             }
-            n.props["quick_charge_type"]?.trim()?.toIntOrNull()?.takeIf { it > 0 }?.let { qct ->
+            if (qct != null) {
                 val qLabel = when (qct) {
                     1 -> "基础快充"; 2 -> "闪充 / PD"; 3 -> "超级快充 / Mi PPS"; 4 -> "澎湃秒充 / HyperCharge"; else -> "类型 $qct"
                 }
                 evidence += Evidence(4, "${n.name}/quick_charge_type = $qct → $qLabel")
+            }
+            if (verified == "1" || (qct != null && qct >= 3 && (brand == "小米" || svid == "2717"))) {
+                val miLabel = "小米 HyperCharge / Mi PPS" + (apdoMax?.let { " (${it}W)" } ?: "")
+                evidence += Evidence(4, "${n.name}：已通过小米私有 PPS 加密认证 → $miLabel")
+                val cur = l4["PD"]
+                if (cur == null || 2 > cur.rank) l4["PD"] = Cls(miLabel, "PD", true, 2)
+                candidates += "★$miLabel（已认证）"
             }
             if (!isInputNode(n)) continue
             for (key in PROTOCOL_KEYS) {
@@ -552,6 +580,11 @@ object Analyzer {
         val cl = candidates.toList()
         val driver = if (l4.isEmpty()) null else l4.values.joinToString(" / ") { it.label }
         var predicted = matched.firstOrNull()?.removePrefix("★")?.removeSuffix("（宣告值）") ?: cl.firstOrNull()?.removePrefix("★")
+        // If L4 confirmed a vendor-authenticated fast-charge protocol (rank >= 2), keep prediction aligned.
+        val vendorConfirmed = l4.values.firstOrNull { it.rank >= 2 }
+        if (vendorConfirmed != null) {
+            predicted = vendorConfirmed.label
+        }
         // Driver says plain USB PD but the advertised ceiling is off the fixed PDO ladder => PPS-style.
         var ppsReason: String? = null
         if (progAdv && l4["PD"]?.rank == 0 && advVv != null) {
@@ -606,11 +639,13 @@ object Analyzer {
             )
             l4.size == 1 -> {
                 val c = l4.values.first()
+                val spec = PROTOCOL_SPECS[c.label]
+                    ?: PROTOCOL_SPECS.entries.firstOrNull { c.label.startsWith(it.key) }?.value
                 mk(
                     Status.CONFIRMED,
                     if (c.fast) "驱动报告：${c.label}" else "驱动报告：${c.label}（非快充）",
                     "C:" + c.label,
-                    PROTOCOL_SPECS[c.label],
+                    spec,
                 )
             }
             maxVin > 5_500_000L || matched.isNotEmpty() || derivedVmin > 5.5 || progAdv -> mk(

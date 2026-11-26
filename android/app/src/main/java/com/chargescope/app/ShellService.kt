@@ -116,7 +116,9 @@ class ShellService : IShellService.Stub() {
     }
 
     private fun readFirstLine(f: File): String? = try {
-        if (!f.canRead()) null else f.bufferedReader().use { it.readLine()?.trim() }
+        if (!f.canRead()) null else f.bufferedReader().use {
+            it.readLine()?.replace("\u0000", "")?.trim()
+        }
     } catch (_: Exception) {
         null
     }
@@ -142,8 +144,9 @@ class ShellService : IShellService.Stub() {
         )
         val VENDOR_FIELDS = arrayOf(
             "quick_charge_type", "pd_active", "pd_verifed", "pd_verified",
-            "pd_authenticated", "apdo_max", "tx_adapter", "adapter_type",
-            "real_type", "soh", "cycle_count", "vbus_now", "ibus_now",
+            "pd_authenticated", "apdo_max", "power_max", "adapter_svid",
+            "tx_adapter", "adapter_type", "real_type", "soh", "cycle_count",
+            "vbus_now", "ibus_now", "bq2597x_bus_voltage", "bq2597x_bus_current",
             "fastchg_type", "voocchg_ing",
         )
     }

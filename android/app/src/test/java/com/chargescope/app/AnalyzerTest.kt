@@ -105,6 +105,21 @@ class AnalyzerTest {
         assertTrue(a.evidence.any { "反推" in it.text })
     }
 
+    @Test fun k70ProXiaomi120WConfirmedAndNotSamsungAfc() {
+        val ucsi = RootNode("ucsi-source-psy-soc:qcom,pmic_glink:qcom,ucsi1", mapOf("type" to "USB", "online" to "1", "voltage_now" to "9000000", "current_now" to "1600000", "usb_type" to "C [PD] PD_PPS"))
+        val usb = RootNode("usb", mapOf("type" to "USB_PD", "online" to "1", "voltage_now" to "8883000", "current_now" to "672000", "usb_type" to "PD [PD_PPS]"))
+        val qcom = RootNode("qcom-battery", mapOf("quick_charge_type" to "4", "pd_verifed" to "1", "apdo_max" to "120", "soh" to "84"))
+        val bat = RootNode("battery", mapOf("type" to "Battery", "charge_full" to "3266000", "charge_full_design" to "5000000"))
+        val s = snap(listOf(ucsi, usb, qcom, bat), ua = -579_000L, mv = 4190)
+        val a = Analyzer.analyze(listOf(s), "Xiaomi")
+        assertEquals(Status.CONFIRMED, a.status)
+        assertEquals("小米 HyperCharge / Mi PPS (120W)", a.driver)
+        assertEquals("小米 HyperCharge / Mi PPS (120W)", a.predicted)
+        assertTrue(a.protocolSpec?.contains("120W") == true)
+        assertEquals(84, Analyzer.batteryHealthPct(s))
+        assertEquals(8_883_000L, Analyzer.input(s).voltageUv)
+    }
+
     @Test fun parseRootOutput() {
         val nodes = RootScanner.parse("@@usb\ntype=USB\nonline=1\n@@battery\ncapacity=50\n")
         assertEquals(2, nodes.size)

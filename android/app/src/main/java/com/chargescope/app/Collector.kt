@@ -74,8 +74,9 @@ object RootScanner {
             "vbus_now ibus_now sc_bus_voltage sc_bus_current ti_bus_voltage ti_bus_current bus_voltage bus_current"
 
     private const val VENDOR_FIELDS =
-        "quick_charge_type pd_active pd_verifed pd_verified pd_authenticated apdo_max " +
-            "tx_adapter adapter_type real_type soh cycle_count vbus_now ibus_now fastchg_type voocchg_ing"
+        "quick_charge_type pd_active pd_verifed pd_verified pd_authenticated apdo_max power_max " +
+            "adapter_svid tx_adapter adapter_type real_type soh cycle_count vbus_now ibus_now " +
+            "bq2597x_bus_voltage bq2597x_bus_current fastchg_type voocchg_ing"
 
     // Fixed read-only script: power_supply + Type-C/PD stack + vendor dirs + dumpsys battery.
     private val SCRIPT = "echo \"#uid=\$(id -u)\"; " +
@@ -221,7 +222,7 @@ object RootScanner {
         synchronized(lock) {
             val (text, err) = runScriptLocked(DEEP_PROBE_SCRIPT, timeoutSec)
             if (err != null || text == null) null to (err ?: "深度扫描失败")
-            else text to null
+            else text.replace("\u0000", "") to null
         }
     }
 
