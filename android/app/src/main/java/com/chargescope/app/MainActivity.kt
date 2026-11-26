@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -163,9 +164,13 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 
 @Composable
 private fun KV(k: String, v: String?) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
         Text(k, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(v ?: "—")
+        Text(v ?: "—", Modifier.weight(1f), textAlign = TextAlign.End)
     }
 }
 
@@ -392,6 +397,27 @@ private fun ArchiveTab() {
 // ---------------------------------------------------------------- device
 
 @Composable
+private fun FieldRow(label: String, status: String, ok: Boolean, note: String? = null) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                status,
+                color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+            )
+        }
+        if (note != null) {
+            Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
 private fun DeviceTab() {
     val ui by Sampler.state.collectAsState()
     val s = ui.latest
@@ -401,11 +427,15 @@ private fun DeviceTab() {
         KV("SoC", if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else null)
     }
     Section("无特权可读字段") {
-        KV("电量/电压/温度/状态", if (s?.levelPct != null || s?.voltageMv != null) "可用" else "不可用")
-        KV("瞬时电流", if (s?.currentUa != null) "可用" else "不可用")
-        KV("平均电流", if (s?.currentAvgUa != null) "可用" else "不可用")
-        KV("累计电荷", s?.chargeCounterUah?.let { "$it µAh" } ?: "不可用")
-        KV("输入侧电压/电流", "需要 Root 或 Shizuku，且节点因机型而异")
+        val baseOk = s?.levelPct != null || s?.voltageMv != null
+        val curOk = s?.currentUa != null
+        val avgOk = s?.currentAvgUa != null
+        val ccVal = s?.chargeCounterUah?.let { "$it µAh" }
+        FieldRow("电量 / 电压 / 温度 / 状态", if (baseOk) "可用" else "不可用", baseOk)
+        FieldRow("瞬时电流", if (curOk) "可用" else "不可用", curOk)
+        FieldRow("平均电流", if (avgOk) "可用" else "不可用", avgOk)
+        FieldRow("累计电荷", ccVal ?: "不可用", ccVal != null)
+        FieldRow("输入侧电压 / 电流", "需 Root / Shizuku", false, "节点路径与可读性因机型和 SELinux 策略而异")
     }
     Section("特权通道读取的节点（只读）") {
         val nodes = s?.rootNodes.orEmpty()
