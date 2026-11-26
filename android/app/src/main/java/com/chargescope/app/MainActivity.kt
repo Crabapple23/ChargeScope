@@ -347,15 +347,18 @@ private fun RealtimeTab() {
         KV(tr("电池电流（绝对值）", "Battery Current"), fmt(s?.let { Analyzer.currentMa(it) }, "mA", 0))
         KV(tr("电池侧功率（估算）", "Battery Power (Est.)"), fmt(ui.batteryPowerW, "W"))
         KV(tr("输入侧功率（需 Root/Shizuku）", "Input Power (Root/Shizuku)"), fmt(ui.inputPowerW, "W"))
+        Analyzer.efficiencyPct(ui.batteryPowerW, ui.inputPowerW)?.let { eff ->
+            KV(tr("估算转换效率", "Est. Efficiency"), "%.1f %%".format(eff))
+        }
         KV(tr("温度", "Temperature"), fmt(s?.tempDeci?.let { it / 10.0 }, "°C", 1))
         val hText = healthText(s?.health)
         val hPct = s?.let { Analyzer.batteryHealthPct(it) }
-        val healthDisplay = when {
-            hText != null && hPct != null -> "$hText ($hPct%)"
-            hText != null -> hText
-            hPct != null -> "$hPct%"
-            else -> null
-        }
+        val cycles = s?.let { Analyzer.batteryCycleCount(it) }
+        val healthDisplay = buildList {
+            if (hText != null) add(hText)
+            if (hPct != null) add("$hPct%")
+            if (cycles != null) add(tr("${cycles}次循环", "$cycles cycles"))
+        }.joinToString(" · ").ifEmpty { null }
         KV(tr("健康", "Health"), healthDisplay)
     }
     Section(tr("功率曲线", "Power Chart")) {
@@ -698,12 +701,34 @@ private fun DeviceTab(onOpenSettings: () -> Unit) {
         KV(tr("屏幕", "Display"), screenInfo)
         KV(tr("内核", "Kernel"), kernelInfo)
     }
+    val deepScanning by Sampler.deepScanning.collectAsState()
+    val deepScan by Sampler.deepScan.collectAsState()
     Section(tr("特权通道读取的节点（只读）", "Privileged Nodes (Read-only)")) {
         val nodes = s?.rootNodes.orEmpty()
         if (nodes.isEmpty()) Text(ui.rootError ?: tr("未启用（在“数据”页开启 Root 或 Shizuku）", "Disabled (enable Root or Shizuku in Data tab)"))
         nodes.forEach { n ->
             Text(n.name, style = MaterialTheme.typography.titleSmall)
             Text(n.props.entries.joinToString("  ") { "${it.key}=${it.value}" }, style = MaterialTheme.typography.bodySmall)
+        }
+        OutlinedButton(
+            enabled = !deepScanning,
+            onClick = { Sampler.startDeepScan(ctx) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (deepScanning) tr("深度扫描中…", "Deep Scanning…") else tr("一键深度扫描（全量充电节点）", "Deep Scan All Charging Nodes"))
+        }
+        Text(
+            tr("扫描本机全部可读的 power_supply / Type-C / 厂商快充节点，结果会自动附带在“导出诊断日志”中。", "Scans all readable power_supply, Type-C, and vendor nodes. Included in exported diagnostic logs."),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    deepScan?.let { report ->
+        Fold(tr("深度扫描结果", "Deep Scan Output"), tr("${report.lines().size} 行", "${report.lines().size} lines")) {
+            Text(report.take(4000), style = MaterialTheme.typography.bodySmall)
+            if (report.length > 4000) {
+                Text(tr("（已截断，完整内容请点“数据 → 导出诊断日志”查看）", "(Truncated; export diagnostic log for full output)"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            }
         }
     }
 }

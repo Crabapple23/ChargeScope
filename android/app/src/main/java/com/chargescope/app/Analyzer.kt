@@ -61,6 +61,26 @@ object Analyzer {
         return n.props["online"] != "0" && n.props["present"] != "0"
     }
 
+    private val VBUS_KEYS = arrayOf("vbus_now", "sc_bus_voltage", "ti_bus_voltage", "bus_voltage")
+    private val IBUS_KEYS = arrayOf("ibus_now", "sc_bus_current", "ti_bus_current", "bus_current")
+
+    private fun toMicroVolts(raw: Long?): Long? = when {
+        raw == null -> null
+        raw in 3_000_000L..50_000_000L -> raw
+        raw in 3_000L..50_000L -> raw * 1000L
+        else -> null
+    }
+
+    private fun toMicroAmps(raw: Long?): Long? {
+        if (raw == null || raw == 0L) return null
+        val a = abs(raw)
+        return when {
+            a in 100_000L..25_000_000L -> raw
+            a in 100L..25_000L -> raw * 1000L
+            else -> null
+        }
+    }
+
     fun input(s: Snapshot): InputInfo {
         var v: Long? = null
         var i: Long? = null
@@ -73,9 +93,22 @@ object Analyzer {
                 advI = n.props["max_charging_current"]?.trim()?.toLongOrNull()?.takeIf { it > 0 }
                 continue
             }
+            // Explicit VBUS/IBUS fields on charge pumps or vendor nodes are always input-side.
+            if (v == null) {
+                for (k in VBUS_KEYS) {
+                    val parsed = toMicroVolts(n.props[k]?.trim()?.toLongOrNull())
+                    if (parsed != null) { v = parsed; break }
+                }
+            }
+            if (i == null) {
+                for (k in IBUS_KEYS) {
+                    val parsed = toMicroAmps(n.props[k]?.trim()?.toLongOrNull())
+                    if (parsed != null) { i = parsed; break }
+                }
+            }
             if (!isInputNode(n)) continue
-            if (v == null) v = n.props["voltage_now"]?.trim()?.toLongOrNull()?.takeIf { it in 3_000_000L..50_000_000L }
-            if (i == null) i = n.props["current_now"]?.trim()?.toLongOrNull()
+            if (v == null) v = toMicroVolts(n.props["voltage_now"]?.trim()?.toLongOrNull())
+            if (i == null) i = toMicroAmps(n.props["current_now"]?.trim()?.toLongOrNull())
             if (type == null) type = (n.props["usb_type"] ?: n.props["real_type"])?.let { activeToken(it) }
         }
         return InputInfo(v, i, type, advV, advI)
@@ -118,6 +151,23 @@ object Analyzer {
             if (pct in 10..120) return pct.coerceAtMost(100)
         }
         return null
+    }
+
+    /** Battery cycle count from sysfs (null if unavailable). */
+    fun batteryCycleCount(s: Snapshot): Int? {
+        for (n in s.rootNodes) {
+            val t = n.props["type"]?.uppercase()
+            if (t != "BATTERY" && n.name != "battery" && n.name != "bms") continue
+            n.props["cycle_count"]?.trim()?.toIntOrNull()?.takeIf { it >= 0 }?.let { return it }
+        }
+        return null
+    }
+
+    /** Estimated conversion efficiency (battery power / input power * 100), only when both sides are valid. */
+    fun efficiencyPct(batW: Double?, inW: Double?): Double? {
+        if (batW == null || inW == null || inW < 2.0) return null
+        val eff = batW / inW * 100.0
+        return if (eff in 45.0..102.0) eff.coerceAtMost(99.9) else null
     }
 
     // ---- Spec table (from the protocol reference document) -------------------------------
@@ -322,9 +372,46 @@ object Analyzer {
         val candidates = LinkedHashSet<String>()
         val brand = brandOf(maker)
 
-        // L4: driver-reported protocol names.
+        // L4: driver-reported protocol names + Type-C/PD stack + vendor fast-charge flags.
         val l4 = LinkedHashMap<String, Cls>()
         for (n in last.rootNodes) {
+            if (n.name == "typec") {
+                val pdRev = n.props["partner_usb_power_delivery_revision"] ?: n.props["usb_power_delivery_revision"]
+                val pdSup = n.props["partner_supports_usb_power_delivery"]
+                if (pdSup == "yes" || (!pdRev.isNullOrBlank() && pdRev != "0.0")) {
+                    val revLabel = if (!pdRev.isNullOrBlank() && pdRev != "0.0") " (PD $pdRev)" else ""
+                    evidence += Evidence(4, "typec：充电器支持 USB PD$revLabel")
+                    val cur = l4["PD"]
+                    if (cur == null) l4["PD"] = Cls("USB PD", "PD", true, 0)
+                }
+                n.props["source_caps"]?.let { caps ->
+                    evidence += Evidence(4, "typec 广播档位：$caps")
+                    if (caps.contains("PPS", true)) {
+                        l4["PD"] = Cls("USB PD PPS", "PD", true, 1)
+                    }
+                }
+                val cablePlug = n.props["cable_plug_type"]
+                val cableRev = n.props["cable_usb_power_delivery_revision"]
+                if (!cablePlug.isNullOrBlank() || (!cableRev.isNullOrBlank() && cableRev != "0.0")) {
+                    evidence += Evidence(3, "typec 线缆信息：" + listOfNotNull(cablePlug, cableRev?.let { "PD $it" }).joinToString(" / "))
+                }
+                continue
+            }
+            val verified = n.props["pd_verifed"] ?: n.props["pd_verified"] ?: n.props["pd_authenticated"]
+            if (verified == "1") {
+                evidence += Evidence(4, "${n.name}：已通过厂商 PPS 加密认证（Mi PPS / HyperCharge）")
+                l4["PD"] = Cls("USB PD PPS", "PD", true, 1)
+                candidates += "★小米 HyperCharge / Mi PPS（已认证）"
+            }
+            n.props["apdo_max"]?.trim()?.toIntOrNull()?.takeIf { it > 0 }?.let { w ->
+                evidence += Evidence(4, "${n.name}/apdo_max = ${w}W（驱动报告 APDO 最大功率）")
+            }
+            n.props["quick_charge_type"]?.trim()?.toIntOrNull()?.takeIf { it > 0 }?.let { qct ->
+                val qLabel = when (qct) {
+                    1 -> "基础快充"; 2 -> "闪充 / PD"; 3 -> "超级快充 / Mi PPS"; 4 -> "澎湃秒充 / HyperCharge"; else -> "类型 $qct"
+                }
+                evidence += Evidence(4, "${n.name}/quick_charge_type = $qct → $qLabel")
+            }
             if (!isInputNode(n)) continue
             for (key in PROTOCOL_KEYS) {
                 val raw = n.props[key] ?: continue

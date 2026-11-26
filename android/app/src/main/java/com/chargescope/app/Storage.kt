@@ -230,6 +230,11 @@ object Report {
         line()
         line("## 事件日志")
         sb.append(AppLog.read())
+        Sampler.deepScan.value?.takeIf { it.isNotBlank() }?.let { deep ->
+            line()
+            line("## 深度扫描结果")
+            sb.append(deep).append('\n')
+        }
         return sb.toString()
     }
 }

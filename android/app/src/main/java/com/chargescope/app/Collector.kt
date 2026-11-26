@@ -59,7 +59,7 @@ object Collector {
 /**
  * Privileged read-only channel for root (Magisk / KernelSU / APatch via persistent `su`).
  * Keeps one interactive `su` session open while root mode is enabled to avoid repeated
- * `su` forks and root-daemon IPC. Executes only a fixed read-only script; nothing is written.
+ * `su` forks and root-daemon IPC. Executes only fixed read-only scripts; nothing is written.
  */
 object RootScanner {
     class Result(val nodes: List<RootNode>, val error: String?)
@@ -68,15 +68,60 @@ object RootScanner {
     private const val FIELDS =
         "type status online present capacity voltage_now current_now current_avg power_now " +
             "voltage_max current_max usb_type real_type charge_type temp input_current_limit " +
-            "constant_charge_current charge_counter charge_full charge_full_design soh cycle_count"
+            "constant_charge_current charge_counter charge_full charge_full_design soh cycle_count " +
+            "quick_charge_type pd_active pd_verifed pd_verified pd_authenticated apdo_max " +
+            "tx_adapter adapter_type fastcharge_mode pd_type pe_type " +
+            "vbus_now ibus_now sc_bus_voltage sc_bus_current ti_bus_voltage ti_bus_current bus_voltage bus_current"
 
-    // No `sed` subprocess: `dumpsys battery` is parsed directly in Kotlin.
+    private const val VENDOR_FIELDS =
+        "quick_charge_type pd_active pd_verifed pd_verified pd_authenticated apdo_max " +
+            "tx_adapter adapter_type real_type soh cycle_count vbus_now ibus_now fastchg_type voocchg_ing"
+
+    // Fixed read-only script: power_supply + Type-C/PD stack + vendor dirs + dumpsys battery.
     private val SCRIPT = "echo \"#uid=\$(id -u)\"; " +
         "for d in /sys/class/power_supply/*; do " +
+        "[ -e \"\$d\" ] || continue; " +
         "echo \"@@\${d##*/}\"; " +
-        "for f in $FIELDS; do v=; { read -r v < \"\$d/\$f\"; } 2>/dev/null && echo \"\$f=\$v\"; done; " +
+        "for f in $FIELDS; do v=; { read -r v < \"\$d/\$f\"; } 2>/dev/null && [ -n \"\$v\" ] && echo \"\$f=\$v\"; done; " +
         "done; " +
+        "for vd in /sys/class/qcom-battery /sys/class/xm_power /sys/class/oplus_chg; do " +
+        "[ -d \"\$vd\" ] || continue; " +
+        "echo \"@@\${vd##*/}\"; " +
+        "for f in $VENDOR_FIELDS; do v=; { read -r v < \"\$vd/\$f\"; } 2>/dev/null && [ -n \"\$v\" ] && echo \"\$f=\$v\"; done; " +
+        "done; " +
+        "if [ -d /sys/class/typec/port0 ]; then " +
+        "echo \"@@typec\"; " +
+        "for f in power_role data_role usb_power_delivery_revision usb_typec_revision; do " +
+        "v=; { read -r v < \"/sys/class/typec/port0/\$f\"; } 2>/dev/null && [ -n \"\$v\" ] && echo \"\$f=\$v\"; done; " +
+        "for f in supports_usb_power_delivery usb_power_delivery_revision; do " +
+        "v=; { read -r v < \"/sys/class/typec/port0-partner/\$f\"; } 2>/dev/null && [ -n \"\$v\" ] && echo \"partner_\$f=\$v\"; done; " +
+        "for f in plug_type usb_power_delivery_revision; do " +
+        "v=; { read -r v < \"/sys/class/typec/port0-cable/\$f\"; } 2>/dev/null && [ -n \"\$v\" ] && echo \"cable_\$f=\$v\"; done; " +
+        "caps=; for c in /sys/class/typec/port0-partner/usb_power_delivery/source-capabilities/*; do " +
+        "[ -d \"\$c\" ] || continue; " +
+        "mv=; { read -r mv < \"\$c/voltage\"; } 2>/dev/null; " +
+        "mxv=; { read -r mxv < \"\$c/maximum_voltage\"; } 2>/dev/null; " +
+        "mnv=; { read -r mnv < \"\$c/minimum_voltage\"; } 2>/dev/null; " +
+        "mxi=; { read -r mxi < \"\$c/maximum_current\"; } 2>/dev/null; " +
+        "if [ -n \"\$mv\" ] && [ -n \"\$mxi\" ]; then caps=\"\$caps \${mv}mV/\${mxi}mA\"; " +
+        "elif [ -n \"\$mnv\" ] && [ -n \"\$mxv\" ] && [ -n \"\$mxi\" ]; then caps=\"\$caps \${mnv}-\${mxv}mV/\${mxi}mA(PPS)\"; fi; " +
+        "done; [ -n \"\$caps\" ] && echo \"source_caps=\$caps\"; " +
+        "fi; " +
         "echo \"@@dumpsys\"; dumpsys battery 2>/dev/null; " +
+        "echo $END\n"
+
+    // On-demand read-only deep probe: enumerates all readable small sysfs files in charging dirs.
+    private val DEEP_PROBE_SCRIPT = "echo \"#uid=\$(id -u)\"; " +
+        "for root in /sys/class/power_supply/* /sys/class/typec/* /sys/class/qcom-battery /sys/class/xm_power /sys/class/oplus_chg; do " +
+        "[ -d \"\$root\" ] || continue; " +
+        "echo \"=== \$root ===\"; " +
+        "for f in \"\$root\"/*; do " +
+        "[ -f \"\$f\" ] && [ -r \"\$f\" ] || continue; " +
+        "bn=\${f##*/}; " +
+        "case \"\$bn\" in uevent|modalias|waiting_for_supplier|wakeup*) continue;; esac; " +
+        "v=; { read -r v < \"\$f\"; } 2>/dev/null && [ -n \"\$v\" ] && echo \"\$bn=\$v\"; " +
+        "done; " +
+        "done; " +
         "echo $END\n"
 
     private val lock = Any()
@@ -113,57 +158,70 @@ object RootScanner {
         return true
     }
 
+    private fun runScriptLocked(script: String, timeoutSec: Long): Pair<String?, String?> {
+        try {
+            ensureSession()
+            val p = proc
+            val w = writer
+            val r = reader
+            if (p == null || w == null || r == null) return null to "su 通道不可用"
+
+            w.write(script)
+            w.flush()
+
+            val future = readerExec.submit(Callable<String?> {
+                val sb = StringBuilder(4096)
+                var out: String? = null
+                while (true) {
+                    val line = r.readLine() ?: break
+                    if (line == END) {
+                        out = sb.toString()
+                        break
+                    }
+                    sb.append(line).append('\n')
+                }
+                out
+            })
+
+            val text = try {
+                future.get(timeoutSec, TimeUnit.SECONDS)
+            } catch (_: TimeoutException) {
+                future.cancel(true)
+                destroySession()
+                return null to "su 等待超时（请在 Root 管理器弹窗中授权后重试）"
+            }
+
+            if (text == null) {
+                val errText = try { p.errorStream.bufferedReader().use { it.readText().trim().take(100) } } catch (_: Exception) { "" }
+                destroySession()
+                return null to ("su 被拒绝或未授权" + (if (errText.isEmpty()) "" else "：$errText"))
+            }
+            return text to null
+        } catch (_: Exception) {
+            destroySession()
+            return null to "未检测到可用的 su（未 Root，或未在 Root 管理器中授权）"
+        }
+    }
+
     suspend fun scan(timeoutSec: Long = 4): Result = withContext(Dispatchers.IO) {
         synchronized(lock) {
-            try {
-                ensureSession()
-                val p = proc
-                val w = writer
-                val r = reader
-                if (p == null || w == null || r == null) {
-                    Result(emptyList(), "su 通道不可用")
-                } else {
-                    w.write(SCRIPT)
-                    w.flush()
-
-                    val future = readerExec.submit(Callable<String?> {
-                        val sb = StringBuilder(2048)
-                        var out: String? = null
-                        while (true) {
-                            val line = r.readLine() ?: break
-                            if (line == END) {
-                                out = sb.toString()
-                                break
-                            }
-                            sb.append(line).append('\n')
-                        }
-                        out
-                    })
-
-                    val text = try {
-                        future.get(timeoutSec, TimeUnit.SECONDS)
-                    } catch (_: TimeoutException) {
-                        future.cancel(true)
-                        destroySession()
-                        return@synchronized Result(emptyList(), "su 等待超时（请在 Root 管理器弹窗中授权后重试）")
-                    }
-
-                    if (text == null) {
-                        val errText = try { p.errorStream.bufferedReader().use { it.readText().trim().take(100) } } catch (_: Exception) { "" }
-                        destroySession()
-                        Result(emptyList(), "su 被拒绝或未授权" + (if (errText.isEmpty()) "" else "：$errText"))
-                    } else {
-                        val res = interpret(text, setOf("0"))
-                        if (res.error != null && !text.contains("#uid=")) {
-                            destroySession()
-                        }
-                        res
-                    }
-                }
-            } catch (e: Exception) {
-                destroySession()
-                Result(emptyList(), "未检测到可用的 su（未 Root，或未在 Root 管理器中授权）")
+            val (text, err) = runScriptLocked(SCRIPT, timeoutSec)
+            if (err != null || text == null) {
+                Result(emptyList(), err ?: "Root 读取失败")
+            } else {
+                val res = interpret(text, setOf("0"))
+                if (res.error != null && !text.contains("#uid=")) destroySession()
+                res
             }
+        }
+    }
+
+    /** On-demand deep scan of all readable charging/Type-C/vendor sysfs files. */
+    suspend fun deepProbe(timeoutSec: Long = 10): Pair<String?, String?> = withContext(Dispatchers.IO) {
+        synchronized(lock) {
+            val (text, err) = runScriptLocked(DEEP_PROBE_SCRIPT, timeoutSec)
+            if (err != null || text == null) null to (err ?: "深度扫描失败")
+            else text to null
         }
     }
 

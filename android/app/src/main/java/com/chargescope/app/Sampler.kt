@@ -230,6 +230,32 @@ object Sampler {
     private val _probeMsg = MutableStateFlow<String?>(null)
     val probeMsg = _probeMsg.asStateFlow()
 
+    private val _deepScanning = MutableStateFlow(false)
+    val deepScanning = _deepScanning.asStateFlow()
+
+    private val _deepScan = MutableStateFlow<String?>(null)
+    val deepScan = _deepScan.asStateFlow()
+
+    fun startDeepScan(ctx: Context) {
+        if (_deepScanning.value) return
+        val app = ctx.applicationContext
+        val mode = Prefs.privMode(app)
+        if (mode == 0) {
+            _deepScan.value = "请先在“数据”页开启 Root 或 Shizuku"
+            return
+        }
+        _deepScanning.value = true
+        bgScope.launch {
+            try {
+                val (text, err) = if (mode == 1) RootScanner.deepProbe(10) else ShizukuBridge.deepProbe(app)
+                _deepScan.value = if (err != null) "扫描失败：$err" else (text?.trim().orEmpty().ifEmpty { "未发现可读节点" })
+                AppLog.i(if (err != null) "深度扫描失败：$err" else "深度扫描完成（${text?.length ?: 0} 字节）")
+            } finally {
+                _deepScanning.value = false
+            }
+        }
+    }
+
     fun setRecording(on: Boolean) {
         recording = on
         _state.value = _state.value.copy(

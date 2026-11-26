@@ -145,4 +145,16 @@ object ShizukuBridge {
             RootScanner.Result(emptyList(), "Shizuku 调用失败：" + (e.message ?: e.javaClass.simpleName))
         }
     }
+
+    suspend fun deepProbe(ctx: Context): Pair<String?, String?> = withContext(Dispatchers.IO) {
+        val st = refreshState()
+        if (st != State.READY) return@withContext null to st.label
+        try {
+            val s = ensureBound(ctx.applicationContext) ?: return@withContext null to "Shizuku 服务连接超时"
+            s.run("deep") to null
+        } catch (e: Throwable) {
+            svc = null
+            null to ("Shizuku 深度扫描失败：" + (e.message ?: e.javaClass.simpleName))
+        }
+    }
 }
