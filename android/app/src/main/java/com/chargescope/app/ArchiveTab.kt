@@ -46,7 +46,8 @@ private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -
         animationSpec = tween(180),
         label = "archiveArrow",
     )
-    Card(Modifier.fillMaxWidth()) {
+    val miuix = LocalIsMiuix.current
+    val cardContent: @Composable () -> Unit = {
         Column {
             Row(
                 Modifier
@@ -55,7 +56,7 @@ private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -
                         onClick = { if (collapsible) expanded = !expanded },
                         onLongClick = onLongPress,
                     )
-                    .padding(12.dp),
+                    .padding(if (miuix) 16.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -85,11 +86,12 @@ private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -
                 enter = expandVertically(tween(200)),
                 exit = shrinkVertically(tween(180)),
             ) {
+                val pad = if (miuix) 16.dp else 12.dp
                 Column(
                     Modifier
                         .fillMaxWidth()
                         .combinedClickable(onClick = {}, onLongClick = onLongPress)
-                        .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                        .padding(start = pad, end = pad, bottom = pad),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(e.headline)
@@ -114,6 +116,7 @@ private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -
             }
         }
     }
+    if (miuix) MiuixCard { cardContent() } else Card(Modifier.fillMaxWidth()) { cardContent() }
 }
 
 @Composable

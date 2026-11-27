@@ -43,8 +43,10 @@ data class AppPrefs(
     val oledBlack: Boolean = false,
     val dualCell: Boolean = false,
     val exportTreeUri: String? = null,
+    val uiStyle: Int = 0, // 0 = Material 3, 1 = MIUIX
 ) {
     val isEn: Boolean get() = lang == "en"
+    val isMiuix: Boolean get() = uiStyle == 1
     val fontMultiplier: Float
         get() = when (fontTier) {
             0 -> 0.88f
@@ -73,6 +75,7 @@ object AppSettings {
             oledBlack = Prefs.oledBlack(ctx),
             dualCell = Prefs.dualCell(ctx),
             exportTreeUri = Prefs.exportTreeUri(ctx),
+            uiStyle = Prefs.uiStyle(ctx),
         )
     }
 
@@ -119,6 +122,11 @@ object AppSettings {
     fun setExportTreeUri(ctx: Context, v: String?) {
         Prefs.setExportTreeUri(ctx, v)
         _prefs.value = _prefs.value.copy(exportTreeUri = v)
+    }
+
+    fun setUiStyle(ctx: Context, v: Int) {
+        Prefs.setUiStyle(ctx, v)
+        _prefs.value = _prefs.value.copy(uiStyle = v)
     }
 }
 
@@ -167,6 +175,29 @@ fun SettingsScreen(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            SettingsCard(tr("界面风格", "UI Style")) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        tr("Material 3（默认）", "Material 3 (Default)") to 0,
+                        tr("MIUIX（HyperOS）", "MIUIX (HyperOS)") to 1,
+                    ).forEach { (label, v) ->
+                        FilterChip(
+                            selected = prefs.uiStyle == v,
+                            onClick = { AppSettings.setUiStyle(ctx, v) },
+                            label = { Text(label) },
+                        )
+                    }
+                }
+                Text(
+                    tr(
+                        "即时生效，不影响任何采集与协议分析功能。MIUIX 风格采用 HyperOS 卡片分层、圆润胶囊控件与精简底栏。",
+                        "Takes effect immediately without affecting any features. MIUIX brings HyperOS-style layered cards, capsule controls, and a sleek bottom bar.",
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             SettingsCard(tr("界面主题", "Theme")) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(
@@ -337,10 +368,26 @@ fun SettingsScreen(
 
 @Composable
 private fun SettingsCard(title: String, content: @Composable () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            content()
+    if (LocalIsMiuix.current) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+            )
+            MiuixCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    content()
+                }
+            }
+        }
+    } else {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                content()
+            }
         }
     }
 }

@@ -87,6 +87,10 @@ object Prefs {
 
     fun dualCellPrompted(c: Context): Boolean = sp(c).getBoolean("dual_cell_prompted", false)
     fun setDualCellPrompted(c: Context, v: Boolean) = sp(c).edit().putBoolean("dual_cell_prompted", v).apply()
+
+    /** 0 = Material 3 (default), 1 = MIUIX (HyperOS style) */
+    fun uiStyle(c: Context): Int = sp(c).getInt("ui_style", 0)
+    fun setUiStyle(c: Context, v: Int) = sp(c).edit().putInt("ui_style", v).apply()
 }
 
 /**

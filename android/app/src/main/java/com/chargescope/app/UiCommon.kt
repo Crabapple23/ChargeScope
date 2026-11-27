@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,48 +28,98 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
 @Composable
 internal fun ScrollBody(content: @Composable () -> Unit) {
+    val miuix = LocalIsMiuix.current
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = if (miuix) 16.dp else 12.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(if (miuix) 12.dp else 10.dp),
     ) { content() }
 }
 
 @Composable
 internal fun Section(title: String, content: @Composable () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            content()
+    if (LocalIsMiuix.current) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+            )
+            MiuixCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    content()
+                }
+            }
+        }
+    } else {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                content()
+            }
         }
     }
 }
 
 @Composable
 internal fun KV(k: String, v: String?) {
+    val miuix = LocalIsMiuix.current
     Row(
-        Modifier.fillMaxWidth(),
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = if (miuix) 2.dp else 0.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
         Text(k, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(v ?: "—", Modifier.weight(1f), textAlign = TextAlign.End)
+        Text(
+            v ?: "—",
+            Modifier.weight(1f),
+            textAlign = TextAlign.End,
+            fontWeight = if (miuix) FontWeight.Medium else FontWeight.Normal,
+        )
     }
 }
 
 @Composable
 internal fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: (Long) -> Unit) {
+    val miuix = LocalIsMiuix.current
     Row(
         Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         options.forEach { (label, v) ->
-            FilterChip(selected = selected == v, onClick = { onSelect(v) }, label = { Text(label) })
+            if (miuix) {
+                val active = selected == v
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable { onSelect(v) },
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
+            } else {
+                FilterChip(selected = selected == v, onClick = { onSelect(v) }, label = { Text(label) })
+            }
         }
     }
 }
@@ -75,21 +127,46 @@ internal fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: 
 @Composable
 internal fun Fold(title: String, summary: String, content: @Composable () -> Unit) {
     // Local state per card so toggling one block never recomposes DataTab or sibling cards.
+    val miuix = LocalIsMiuix.current
     var expanded by remember { mutableStateOf(false) }
     val arrowAngle = animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
         animationSpec = tween(180),
         label = "foldArrow",
     )
-    Card(Modifier.fillMaxWidth()) {
+    val body: @Composable () -> Unit = {
         Column {
             Row(
-                Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(12.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(if (miuix) 16.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                if (!expanded) Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    title,
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = if (miuix) FontWeight.Medium else FontWeight.Normal,
+                )
+                if (!expanded) {
+                    if (miuix) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Text(
+                                summary,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                            )
+                        }
+                    } else {
+                        Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 // Read animated value inside graphicsLayer so rotation runs on GPU without recomposing.
                 Text("▸", Modifier.graphicsLayer { rotationZ = arrowAngle.value })
             }
@@ -98,12 +175,14 @@ internal fun Fold(title: String, summary: String, content: @Composable () -> Uni
                 enter = expandVertically(tween(200)),
                 exit = shrinkVertically(tween(180)),
             ) {
-                Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val hPad = if (miuix) 16.dp else 12.dp
+                Column(Modifier.padding(start = hPad, end = hPad, bottom = hPad), verticalArrangement = Arrangement.spacedBy(if (miuix) 8.dp else 6.dp)) {
                     content()
                 }
             }
         }
     }
+    if (miuix) MiuixCard { body() } else Card(Modifier.fillMaxWidth()) { body() }
 }
 
 internal fun fmt(v: Double?, unit: String, digits: Int = 2): String? =

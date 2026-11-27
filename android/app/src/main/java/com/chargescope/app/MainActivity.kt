@@ -96,7 +96,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class TabItem(val zh: String, val en: String, val icon: Int)
+internal data class TabItem(val zh: String, val en: String, val icon: Int)
 
 private val TABS = listOf(
     TabItem("实时", "Live", R.drawable.ic_tab_realtime),
@@ -133,7 +133,9 @@ private fun App() {
         else -> lightColorScheme()
     }
     // OLED pure black overrides only surface/background layers in dark mode, preserving Monet accent colors.
-    val colors = if (dark && prefs.oledBlack) {
+    val colors = if (prefs.isMiuix) {
+        miuixColorScheme(dark = dark, dynamicColor = prefs.dynamicColor, oledBlack = prefs.oledBlack)
+    } else if (dark && prefs.oledBlack) {
         baseColors.copy(
             background = Color.Black,
             surface = Color.Black,
@@ -151,9 +153,9 @@ private fun App() {
     SideEffect {
         (ctx as? ComponentActivity)?.window?.let { w ->
             @Suppress("DEPRECATION")
-            w.statusBarColor = colors.surface.toArgb()
+            w.statusBarColor = if (prefs.isMiuix) colors.background.toArgb() else colors.surface.toArgb()
             @Suppress("DEPRECATION")
-            w.navigationBarColor = colors.surface.toArgb()
+            w.navigationBarColor = if (prefs.isMiuix) colors.surfaceContainerLowest.toArgb() else colors.surface.toArgb()
             val ctl = WindowCompat.getInsetsController(w, view)
             ctl.isAppearanceLightStatusBars = !dark
             ctl.isAppearanceLightNavigationBars = !dark
@@ -165,8 +167,15 @@ private fun App() {
         Density(baseDensity.density, baseDensity.fontScale * prefs.fontMultiplier)
     }
 
-    CompositionLocalProvider(LocalDensity provides scaledDensity, LocalIsEn provides prefs.isEn) {
-        MaterialTheme(colorScheme = colors) {
+    CompositionLocalProvider(
+        LocalDensity provides scaledDensity,
+        LocalIsEn provides prefs.isEn,
+        LocalIsMiuix provides prefs.isMiuix,
+    ) {
+        MaterialTheme(
+            colorScheme = colors,
+            shapes = if (prefs.isMiuix) MiuixShapes else MaterialTheme.shapes,
+        ) {
             BackHandler(enabled = showOnboarding) {
                 // Prevent accidental dismissal of the first-launch guide via back gesture.
             }
@@ -187,36 +196,41 @@ private fun App() {
             Box(Modifier.fillMaxSize()) {
                 Scaffold(
                     bottomBar = {
-                        NavigationBar {
-                            TABS.forEachIndexed { i, t ->
-                                val label = tr(t.zh, t.en)
-                                val archivedToast = tr("已存档当前协议状态", "Current protocol archived")
-                                val noDataToast = tr("暂无采样数据，无法存档", "No sample yet")
-                                NavigationBarItem(
-                                    selected = tab == i,
-                                    onClick = {
-                                        if (i == 1) {
-                                            val now = SystemClock.elapsedRealtime()
-                                            if (now - lastProtocolTapMs <= 400L) {
-                                                lastProtocolTapMs = 0L
-                                                val ok = Sampler.archiveNow(ctx)
-                                                Toast.makeText(ctx, if (ok) archivedToast else noDataToast, Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                lastProtocolTapMs = now
-                                            }
-                                        } else {
-                                            lastProtocolTapMs = 0L
-                                        }
-                                        tab = i
-                                    },
-                                    icon = {
-                                        Icon(
-                                            painter = painterResource(t.icon),
-                                            contentDescription = label,
-                                        )
-                                    },
-                                    label = { Text(label) },
-                                )
+                        val archivedToast = tr("已存档当前协议状态", "Current protocol archived")
+                        val noDataToast = tr("暂无采样数据，无法存档", "No sample yet")
+                        val onTabClick: (Int) -> Unit = { i ->
+                            if (i == 1) {
+                                val now = SystemClock.elapsedRealtime()
+                                if (now - lastProtocolTapMs <= 400L) {
+                                    lastProtocolTapMs = 0L
+                                    val ok = Sampler.archiveNow(ctx)
+                                    Toast.makeText(ctx, if (ok) archivedToast else noDataToast, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    lastProtocolTapMs = now
+                                }
+                            } else {
+                                lastProtocolTapMs = 0L
+                            }
+                            tab = i
+                        }
+                        if (prefs.isMiuix) {
+                            MiuixBottomBar(tabs = TABS, selectedIndex = tab, onSelect = onTabClick)
+                        } else {
+                            NavigationBar {
+                                TABS.forEachIndexed { i, t ->
+                                    val label = tr(t.zh, t.en)
+                                    NavigationBarItem(
+                                        selected = tab == i,
+                                        onClick = { onTabClick(i) },
+                                        icon = {
+                                            Icon(
+                                                painter = painterResource(t.icon),
+                                                contentDescription = label,
+                                            )
+                                        },
+                                        label = { Text(label) },
+                                    )
+                                }
                             }
                         }
                     },
