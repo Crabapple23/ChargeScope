@@ -1,10 +1,16 @@
 package com.chargescope.app
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -20,8 +26,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,19 +37,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
+val LocalBottomBarExtra = compositionLocalOf { 0.dp }
+
 @Composable
 internal fun ScrollBody(content: @Composable () -> Unit) {
     val miuix = LocalIsMiuix.current
+    val extraBottom = LocalBottomBarExtra.current
     Column(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = if (miuix) 16.dp else 12.dp, vertical = 12.dp),
+            .padding(
+                start = if (miuix) 16.dp else 12.dp,
+                end = if (miuix) 16.dp else 12.dp,
+                top = 12.dp,
+                bottom = 12.dp + extraBottom,
+            ),
         verticalArrangement = Arrangement.spacedBy(if (miuix) 12.dp else 10.dp),
     ) { content() }
 }
@@ -93,7 +110,20 @@ internal fun KV(k: String, v: String?) {
 }
 
 @Composable
-internal fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: (Long) -> Unit) {
+internal fun AppSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
+    if (LocalIsMiuix.current) {
+        MiuixSwitch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+    } else {
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+    }
+}
+
+@Composable
+internal fun <T> OptionChips(options: List<Pair<String, T>>, selected: T, onSelect: (T) -> Unit) {
     val miuix = LocalIsMiuix.current
     Row(
         Modifier.horizontalScroll(rememberScrollState()),
@@ -102,9 +132,25 @@ internal fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: 
         options.forEach { (label, v) ->
             if (miuix) {
                 val active = selected == v
+                val bg by animateColorAsState(
+                    targetValue = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    animationSpec = tween(160),
+                    label = "miuixChipBg",
+                )
+                val border by animateColorAsState(
+                    targetValue = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f) else Color.Transparent,
+                    animationSpec = tween(160),
+                    label = "miuixChipBorder",
+                )
+                val fg by animateColorAsState(
+                    targetValue = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    animationSpec = tween(160),
+                    label = "miuixChipFg",
+                )
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    color = bg,
+                    border = BorderStroke(1.dp, border),
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .clickable { onSelect(v) },
@@ -113,7 +159,7 @@ internal fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: 
                         text = label,
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        color = fg,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                     )
                 }
@@ -125,13 +171,18 @@ internal fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: 
 }
 
 @Composable
+internal fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: (Long) -> Unit) {
+    OptionChips(options, selected, onSelect)
+}
+
+@Composable
 internal fun Fold(title: String, summary: String, content: @Composable () -> Unit) {
     // Local state per card so toggling one block never recomposes DataTab or sibling cards.
     val miuix = LocalIsMiuix.current
     var expanded by remember { mutableStateOf(false) }
     val arrowAngle = animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(180),
+        animationSpec = if (miuix) spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMedium) else tween(180),
         label = "foldArrow",
     )
     val body: @Composable () -> Unit = {
@@ -172,8 +223,8 @@ internal fun Fold(title: String, summary: String, content: @Composable () -> Uni
             }
             AnimatedVisibility(
                 visible = expanded,
-                enter = expandVertically(tween(200)),
-                exit = shrinkVertically(tween(180)),
+                enter = if (miuix) expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(180)) else expandVertically(tween(200)),
+                exit = if (miuix) shrinkVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium)) + fadeOut(tween(140)) else shrinkVertically(tween(180)),
             ) {
                 val hPad = if (miuix) 16.dp else 12.dp
                 Column(Modifier.padding(start = hPad, end = hPad, bottom = hPad), verticalArrangement = Arrangement.spacedBy(if (miuix) 8.dp else 6.dp)) {

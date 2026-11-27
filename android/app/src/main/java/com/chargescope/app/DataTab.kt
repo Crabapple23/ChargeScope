@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -165,7 +164,7 @@ internal fun DataTab() {
     Fold(tr("自动记录", "Auto Record"), if (auto) tr("已开启", "On") else tr("已关闭", "Off")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(tr("连接充电器时自动开始，拔出后停止", "Auto-start on plug-in, stop on unplug"), Modifier.weight(1f))
-            Switch(checked = auto, onCheckedChange = {
+            AppSwitch(checked = auto, onCheckedChange = {
                 if (it && Build.VERSION.SDK_INT >= 33 && !hasNotificationPermission(ctx)) {
                     autoNotifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 } else {
@@ -180,7 +179,7 @@ internal fun DataTab() {
     Fold(tr("双电芯设备模式", "Dual-Cell Battery Mode"), if (prefs.dualCell) tr("已开启", "On") else tr("已关闭", "Off")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(tr("按 2S 串联双电芯算法计算功率与容量", "Use 2S dual-cell math for power & capacity"), Modifier.weight(1f))
-            Switch(
+            AppSwitch(
                 checked = prefs.dualCell,
                 onCheckedChange = { Sampler.onDualCellChanged(ctx, it) },
             )

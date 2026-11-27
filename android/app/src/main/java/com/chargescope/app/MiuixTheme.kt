@@ -2,19 +2,32 @@ package com.chargescope.app
 
 import android.os.Build
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.HorizontalDivider
@@ -34,7 +47,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -148,6 +164,77 @@ internal fun MiuixCard(
     )
 }
 
+/** Smooth HyperOS-style spring capsule switch used in MIUIX mode. */
+@Composable
+internal fun MiuixSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
+    val trackColor by animateColorAsState(
+        targetValue = when {
+            !enabled -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
+            checked -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        animationSpec = tween(180),
+        label = "miuixSwitchTrack",
+    )
+    val thumbOffset by animateDpAsState(
+        targetValue = if (checked) 20.dp else 0.dp,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMedium),
+        label = "miuixSwitchThumb",
+    )
+    val thumbScale by animateFloatAsState(
+        targetValue = if (checked) 1.0f else 0.94f,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMedium),
+        label = "miuixSwitchScale",
+    )
+    val thumbColor by animateColorAsState(
+        targetValue = when {
+            !enabled -> Color.White.copy(alpha = 0.6f)
+            checked -> MaterialTheme.colorScheme.onPrimary
+            else -> Color.White
+        },
+        animationSpec = tween(180),
+        label = "miuixSwitchThumbColor",
+    )
+    Box(
+        modifier = Modifier
+            .width(48.dp)
+            .height(28.dp)
+            .clip(RoundedCornerShape(50))
+            .background(trackColor)
+            .border(
+                width = 0.5.dp,
+                color = if (checked) Color.Transparent else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(50),
+            )
+            .clickable(
+                enabled = enabled,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = { onCheckedChange(!checked) },
+            )
+            .padding(3.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(
+            modifier = Modifier
+                .offset(x = thumbOffset)
+                .size(22.dp)
+                .graphicsLayer {
+                    scaleX = thumbScale
+                    scaleY = thumbScale
+                }
+                .shadow(elevation = if (enabled) 2.dp else 0.dp, shape = CircleShape)
+                .clip(CircleShape)
+                .background(thumbColor),
+        )
+    }
+}
+
+/** Standard MIUIX docked bottom bar with fluid sliding pill and spring icon scale. */
 @Composable
 internal fun MiuixBottomBar(
     tabs: List<TabItem>,
@@ -162,11 +249,189 @@ internal fun MiuixBottomBar(
     ) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-            Row(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(60.dp)
-                    .padding(horizontal = 6.dp),
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+            ) {
+                val tabWidth = maxWidth / tabs.size.coerceAtLeast(1)
+                val pillOffset by animateDpAsState(
+                    targetValue = tabWidth * selectedIndex,
+                    animationSpec = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow),
+                    label = "miuixBarPill",
+                )
+                Box(
+                    modifier = Modifier
+                        .offset(x = pillOffset)
+                        .width(tabWidth)
+                        .fillMaxHeight()
+                        .padding(horizontal = 4.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.11f)),
+                )
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    tabs.forEachIndexed { i, t ->
+                        val selected = selectedIndex == i
+                        val label = tr(t.zh, t.en)
+                        val tint by animateColorAsState(
+                            targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            animationSpec = tween(160),
+                            label = "miuixTabTint",
+                        )
+                        val iconScale by animateFloatAsState(
+                            targetValue = if (selected) 1.08f else 0.96f,
+                            animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMedium),
+                            label = "miuixTabScale",
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = { onSelect(i) },
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Icon(
+                                    painter = painterResource(t.icon),
+                                    contentDescription = label,
+                                    tint = tint,
+                                    modifier = Modifier
+                                        .size(21.dp)
+                                        .graphicsLayer {
+                                            scaleX = iconScale
+                                            scaleY = iconScale
+                                        },
+                                )
+                                Text(
+                                    text = label,
+                                    color = tint,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Optional floating Liquid Glass capsule bottom bar with specular rim highlight & fluid spring indicator. */
+@Composable
+internal fun LiquidGlassBottomBar(
+    tabs: List<TabItem>,
+    selectedIndex: Int,
+    dark: Boolean = isSystemInDarkTheme(),
+    onSelect: (Int) -> Unit,
+) {
+    val glassShape = RoundedCornerShape(30.dp)
+    val glassFill = if (dark) {
+        Brush.verticalGradient(
+            listOf(
+                Color(0xFF2A2B32).copy(alpha = 0.78f),
+                Color(0xFF17181E).copy(alpha = 0.86f),
+            ),
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.84f),
+                Color(0xFFF0F4FA).copy(alpha = 0.76f),
+            ),
+        )
+    }
+    val rimBorder = if (dark) {
+        Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.34f),
+                Color.White.copy(alpha = 0.08f),
+                Color.White.copy(alpha = 0.16f),
+            ),
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.95f),
+                Color(0xFFD6DCE8).copy(alpha = 0.55f),
+                Color.White.copy(alpha = 0.75f),
+            ),
+        )
+    }
+    val indicatorFill = if (dark) {
+        Brush.verticalGradient(
+            listOf(
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.34f),
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+            ),
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+            ),
+        )
+    }
+    val indicatorRim = if (dark) {
+        Color.White.copy(alpha = 0.24f)
+    } else {
+        Color.White.copy(alpha = 0.85f)
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(62.dp)
+                .shadow(
+                    elevation = if (dark) 16.dp else 12.dp,
+                    shape = glassShape,
+                    ambientColor = Color.Black.copy(alpha = if (dark) 0.55f else 0.18f),
+                    spotColor = Color.Black.copy(alpha = if (dark) 0.6f else 0.22f),
+                )
+                .clip(glassShape)
+                .background(glassFill)
+                .border(width = 1.dp, brush = rimBorder, shape = glassShape)
+                .padding(5.dp),
+        ) {
+            val tabWidth = maxWidth / tabs.size.coerceAtLeast(1)
+            val pillOffset by animateDpAsState(
+                targetValue = tabWidth * selectedIndex,
+                animationSpec = spring(dampingRatio = 0.68f, stiffness = Spring.StiffnessMediumLow),
+                label = "liquidGlassPill",
+            )
+            // Fluid glass selection capsule
+            Box(
+                modifier = Modifier
+                    .offset(x = pillOffset)
+                    .width(tabWidth)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(25.dp))
+                    .background(indicatorFill)
+                    .border(0.75.dp, indicatorRim, RoundedCornerShape(25.dp)),
+            )
+            Row(
+                modifier = Modifier.fillMaxSize(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 tabs.forEachIndexed { i, t ->
@@ -174,47 +439,45 @@ internal fun MiuixBottomBar(
                     val label = tr(t.zh, t.en)
                     val tint by animateColorAsState(
                         targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        animationSpec = tween(160),
-                        label = "miuixTabTint",
+                        animationSpec = tween(180),
+                        label = "glassTabTint",
                     )
-                    val pillBg by animateColorAsState(
-                        targetValue = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.11f) else Color.Transparent,
-                        animationSpec = tween(160),
-                        label = "miuixTabPill",
+                    val scale by animateFloatAsState(
+                        targetValue = if (selected) 1.10f else 0.95f,
+                        animationSpec = spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMedium),
+                        label = "glassTabScale",
                     )
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(14.dp))
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(25.dp))
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
                                 onClick = { onSelect(i) },
-                            )
-                            .padding(vertical = 4.dp),
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = pillBg,
-                            ) {
-                                Box(Modifier.padding(horizontal = 12.dp, vertical = 3.dp)) {
-                                    Icon(
-                                        painter = painterResource(t.icon),
-                                        contentDescription = label,
-                                        tint = tint,
-                                        modifier = Modifier.size(21.dp),
-                                    )
-                                }
-                            }
+                            Icon(
+                                painter = painterResource(t.icon),
+                                contentDescription = label,
+                                tint = tint,
+                                modifier = Modifier
+                                    .size(21.dp)
+                                    .graphicsLayer {
+                                        scaleX = scale
+                                        scaleY = scale
+                                    },
+                            )
                             Text(
                                 text = label,
                                 color = tint,
-                                fontSize = 11.sp,
+                                fontSize = 10.5.sp,
                                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                                 maxLines = 1,
                             )

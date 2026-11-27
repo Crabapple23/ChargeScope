@@ -2,9 +2,13 @@ package com.chargescope.app
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -40,13 +44,13 @@ import androidx.compose.ui.unit.dp
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -> Unit) {
+    val miuix = LocalIsMiuix.current
     var expanded by remember(e.wallMs, collapsible) { mutableStateOf(!collapsible) }
     val arrowAngle = animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(180),
+        animationSpec = if (miuix) spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMedium) else tween(180),
         label = "archiveArrow",
     )
-    val miuix = LocalIsMiuix.current
     val cardContent: @Composable () -> Unit = {
         Column {
             Row(
@@ -83,8 +87,8 @@ private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -
             }
             AnimatedVisibility(
                 visible = expanded,
-                enter = expandVertically(tween(200)),
-                exit = shrinkVertically(tween(180)),
+                enter = if (miuix) expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(180)) else expandVertically(tween(200)),
+                exit = if (miuix) shrinkVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium)) + fadeOut(tween(140)) else shrinkVertically(tween(180)),
             ) {
                 val pad = if (miuix) 16.dp else 12.dp
                 Column(
@@ -190,10 +194,17 @@ internal fun ArchiveTab() {
         )
     }
 
+    val miuix = LocalIsMiuix.current
+    val extraBottom = LocalBottomBarExtra.current
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(
+            start = if (miuix) 16.dp else 12.dp,
+            end = if (miuix) 16.dp else 12.dp,
+            top = 12.dp,
+            bottom = 12.dp + extraBottom,
+        ),
+        verticalArrangement = Arrangement.spacedBy(if (miuix) 12.dp else 10.dp),
     ) {
         item(key = "header") {
             Section(tr("协议识别存档（${items.size} 条，仅保存在本机）", "Protocol Archive (${items.size}, local only)")) {

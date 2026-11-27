@@ -91,6 +91,9 @@ object Prefs {
     /** 0 = Material 3 (default), 1 = MIUIX (HyperOS style) */
     fun uiStyle(c: Context): Int = sp(c).getInt("ui_style", 0)
     fun setUiStyle(c: Context, v: Int) = sp(c).edit().putInt("ui_style", v).apply()
+
+    fun liquidGlassBar(c: Context): Boolean = sp(c).getBoolean("liquid_glass_bar", false)
+    fun setLiquidGlassBar(c: Context, v: Boolean) = sp(c).edit().putBoolean("liquid_glass_bar", v).apply()
 }
 
 /**

@@ -28,7 +28,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
@@ -126,8 +129,10 @@ private fun LegendDot(color: Color, text: String) {
 
 @Composable
 private fun PowerChart(series: Series) {
-    val batColor = MaterialTheme.colorScheme.primary
-    val inColor = MaterialTheme.colorScheme.tertiary
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    // Use complementary high-contrast colors so both curves stay distinct even under Monet dynamic themes.
+    val batColor = if (isDark) Color(0xFF4FC3F7) else Color(0xFF1976D2)
+    val inColor = if (isDark) Color(0xFFFFB74D) else Color(0xFFEF6C00)
     val grid = MaterialTheme.colorScheme.outlineVariant
     if (series.validCount < 2) {
         Text(tr("等待数据…（至少需要 2 个采样点）", "Waiting for data… (at least 2 samples needed)"))
@@ -137,7 +142,6 @@ private fun PowerChart(series: Series) {
     val small = MaterialTheme.typography.labelSmall
     val batPath = remember { Path() }
     val inPath = remember { Path() }
-    val stroke = remember { Stroke(width = 3f) }
 
     Row(Modifier.fillMaxWidth().height(150.dp)) {
         Column(
@@ -150,6 +154,7 @@ private fun PowerChart(series: Series) {
             Text("0 W", style = small)
         }
         Canvas(Modifier.weight(1f).fillMaxHeight()) {
+            val stroke = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
             for (f in GRID_FRACTIONS) {
                 val y = if (f == 1f) size.height - 1f else size.height * f
                 drawLine(grid, Offset(0f, y), Offset(size.width, y), 1f)

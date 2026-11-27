@@ -29,7 +29,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -181,7 +180,10 @@ fun OnboardingScreen(onFinish: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 when (step) {
-                    0 -> NoticeStep()
+                    0 -> NoticeStep(
+                        uiStyle = appPrefs.uiStyle,
+                        onSelectUiStyle = { AppSettings.setUiStyle(ctx, it) },
+                    )
                     1 -> NotificationStep(
                         granted = notifGranted,
                         asked = notifAsked,
@@ -280,8 +282,8 @@ fun OnboardingScreen(onFinish: () -> Unit) {
 
 @Composable
 private fun OnboardingCard(title: String, body: String) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    val content: @Composable () -> Unit = {
+        Column(Modifier.padding(if (LocalIsMiuix.current) 16.dp else 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(
                 body,
@@ -290,17 +292,43 @@ private fun OnboardingCard(title: String, body: String) {
             )
         }
     }
+    if (LocalIsMiuix.current) MiuixCard { content() } else Card(Modifier.fillMaxWidth()) { content() }
 }
 
 @Composable
-private fun NoticeStep() {
+private fun NoticeStep(
+    uiStyle: Int,
+    onSelectUiStyle: (Int) -> Unit,
+) {
     Text(
         tr(
-            "欢迎使用「充了个电 (ChargeScope)」。在开始之前，请了解以下使用原则：",
-            "Welcome to ChargeScope. Please review the following principles before starting:",
+            "欢迎使用「充了个电 (ChargeScope)」。在开始之前，请选择喜欢的界面风格并了解使用原则：",
+            "Welcome to ChargeScope. Choose your preferred UI style and review the principles below:",
         ),
         style = MaterialTheme.typography.bodyMedium,
     )
+    val stylePickerContent: @Composable () -> Unit = {
+        Column(Modifier.padding(if (LocalIsMiuix.current) 16.dp else 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(tr("选择软件界面风格", "Choose UI Style"), style = MaterialTheme.typography.titleMedium)
+            OptionChips(
+                options = listOf(
+                    tr("Material 3（默认）", "Material 3 (Default)") to 0,
+                    tr("MIUIX（HyperOS）", "MIUIX (HyperOS)") to 1,
+                ),
+                selected = uiStyle,
+                onSelect = onSelectUiStyle,
+            )
+            Text(
+                tr(
+                    "即时切换预览，后续随时可在「设备 → 设置 → 界面风格」中更改。",
+                    "Previews immediately; can be changed anytime under Device → Settings → UI Style.",
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    if (LocalIsMiuix.current) MiuixCard { stylePickerContent() } else Card(Modifier.fillMaxWidth()) { stylePickerContent() }
     OnboardingCard(
         title = tr("1. 纯本地离线运行", "1. Offline & Private"),
         body = tr(
@@ -580,7 +608,7 @@ private fun PrivilegedStep(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(tr("双电芯设备模式（可选）", "Dual-Cell Battery Mode (Optional)"), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                Switch(checked = dualCell, onCheckedChange = onDualCellChanged)
+                AppSwitch(checked = dualCell, onCheckedChange = onDualCellChanged)
             }
             Text(
                 tr(

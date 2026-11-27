@@ -9,6 +9,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -155,7 +158,11 @@ private fun App() {
             @Suppress("DEPRECATION")
             w.statusBarColor = if (prefs.isMiuix) colors.background.toArgb() else colors.surface.toArgb()
             @Suppress("DEPRECATION")
-            w.navigationBarColor = if (prefs.isMiuix) colors.surfaceContainerLowest.toArgb() else colors.surface.toArgb()
+            w.navigationBarColor = when {
+                prefs.liquidGlassBar -> colors.background.toArgb()
+                prefs.isMiuix -> colors.surfaceContainerLowest.toArgb()
+                else -> colors.surface.toArgb()
+            }
             val ctl = WindowCompat.getInsetsController(w, view)
             ctl.isAppearanceLightStatusBars = !dark
             ctl.isAppearanceLightNavigationBars = !dark
@@ -171,6 +178,7 @@ private fun App() {
         LocalDensity provides scaledDensity,
         LocalIsEn provides prefs.isEn,
         LocalIsMiuix provides prefs.isMiuix,
+        LocalBottomBarExtra provides (if (prefs.liquidGlassBar) 88.dp else 0.dp),
     ) {
         MaterialTheme(
             colorScheme = colors,
@@ -194,42 +202,44 @@ private fun App() {
                 }
             }
             Box(Modifier.fillMaxSize()) {
+                val archivedToast = tr("已存档当前协议状态", "Current protocol archived")
+                val noDataToast = tr("暂无采样数据，无法存档", "No sample yet")
+                val onTabClick: (Int) -> Unit = { i ->
+                    if (i == 1) {
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastProtocolTapMs <= 400L) {
+                            lastProtocolTapMs = 0L
+                            val ok = Sampler.archiveNow(ctx)
+                            Toast.makeText(ctx, if (ok) archivedToast else noDataToast, Toast.LENGTH_SHORT).show()
+                        } else {
+                            lastProtocolTapMs = now
+                        }
+                    } else {
+                        lastProtocolTapMs = 0L
+                    }
+                    tab = i
+                }
                 Scaffold(
                     bottomBar = {
-                        val archivedToast = tr("已存档当前协议状态", "Current protocol archived")
-                        val noDataToast = tr("暂无采样数据，无法存档", "No sample yet")
-                        val onTabClick: (Int) -> Unit = { i ->
-                            if (i == 1) {
-                                val now = SystemClock.elapsedRealtime()
-                                if (now - lastProtocolTapMs <= 400L) {
-                                    lastProtocolTapMs = 0L
-                                    val ok = Sampler.archiveNow(ctx)
-                                    Toast.makeText(ctx, if (ok) archivedToast else noDataToast, Toast.LENGTH_SHORT).show()
-                                } else {
-                                    lastProtocolTapMs = now
-                                }
+                        if (!prefs.liquidGlassBar) {
+                            if (prefs.isMiuix) {
+                                MiuixBottomBar(tabs = TABS, selectedIndex = tab, onSelect = onTabClick)
                             } else {
-                                lastProtocolTapMs = 0L
-                            }
-                            tab = i
-                        }
-                        if (prefs.isMiuix) {
-                            MiuixBottomBar(tabs = TABS, selectedIndex = tab, onSelect = onTabClick)
-                        } else {
-                            NavigationBar {
-                                TABS.forEachIndexed { i, t ->
-                                    val label = tr(t.zh, t.en)
-                                    NavigationBarItem(
-                                        selected = tab == i,
-                                        onClick = { onTabClick(i) },
-                                        icon = {
-                                            Icon(
-                                                painter = painterResource(t.icon),
-                                                contentDescription = label,
-                                            )
-                                        },
-                                        label = { Text(label) },
-                                    )
+                                NavigationBar {
+                                    TABS.forEachIndexed { i, t ->
+                                        val label = tr(t.zh, t.en)
+                                        NavigationBarItem(
+                                            selected = tab == i,
+                                            onClick = { onTabClick(i) },
+                                            icon = {
+                                                Icon(
+                                                    painter = painterResource(t.icon),
+                                                    contentDescription = label,
+                                                )
+                                            },
+                                            label = { Text(label) },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -237,19 +247,45 @@ private fun App() {
                 ) { pad ->
                     // Each tab collects only the state it needs, avoiding root-level recompositions every 2s.
                     Box(Modifier.padding(pad).fillMaxSize()) {
-                        when (tab) {
-                            0 -> ScrollBody { RealtimeTab() }
-                            1 -> ScrollBody { ProtocolTab() }
-                            2 -> ArchiveTab()
-                            3 -> ScrollBody { DataTab() }
-                            else -> ScrollBody { DeviceTab(onOpenSettings = { showSettings = true }) }
+                        if (prefs.isMiuix) {
+                            Crossfade(
+                                targetState = tab,
+                                animationSpec = tween(180, easing = FastOutSlowInEasing),
+                                label = "miuixTabCrossfade",
+                            ) { current ->
+                                when (current) {
+                                    0 -> ScrollBody { RealtimeTab() }
+                                    1 -> ScrollBody { ProtocolTab() }
+                                    2 -> ArchiveTab()
+                                    3 -> ScrollBody { DataTab() }
+                                    else -> ScrollBody { DeviceTab(onOpenSettings = { showSettings = true }) }
+                                }
+                            }
+                        } else {
+                            when (tab) {
+                                0 -> ScrollBody { RealtimeTab() }
+                                1 -> ScrollBody { ProtocolTab() }
+                                2 -> ArchiveTab()
+                                3 -> ScrollBody { DataTab() }
+                                else -> ScrollBody { DeviceTab(onOpenSettings = { showSettings = true }) }
+                            }
                         }
+                    }
+                }
+                if (prefs.liquidGlassBar) {
+                    Box(Modifier.align(Alignment.BottomCenter)) {
+                        LiquidGlassBottomBar(
+                            tabs = TABS,
+                            selectedIndex = tab,
+                            dark = dark,
+                            onSelect = onTabClick,
+                        )
                     }
                 }
                 AnimatedVisibility(
                     visible = showSettings,
-                    enter = slideInHorizontally(tween(240)) { it } + fadeIn(tween(180)),
-                    exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(160)),
+                    enter = slideInHorizontally(tween(if (prefs.isMiuix) 280 else 240, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(180)),
+                    exit = slideOutHorizontally(tween(if (prefs.isMiuix) 240 else 220, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(160)),
                 ) {
                     Box(
                         Modifier

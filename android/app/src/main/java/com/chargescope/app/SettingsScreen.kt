@@ -15,13 +15,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
@@ -44,6 +42,7 @@ data class AppPrefs(
     val dualCell: Boolean = false,
     val exportTreeUri: String? = null,
     val uiStyle: Int = 0, // 0 = Material 3, 1 = MIUIX
+    val liquidGlassBar: Boolean = false,
 ) {
     val isEn: Boolean get() = lang == "en"
     val isMiuix: Boolean get() = uiStyle == 1
@@ -76,6 +75,7 @@ object AppSettings {
             dualCell = Prefs.dualCell(ctx),
             exportTreeUri = Prefs.exportTreeUri(ctx),
             uiStyle = Prefs.uiStyle(ctx),
+            liquidGlassBar = Prefs.liquidGlassBar(ctx),
         )
     }
 
@@ -128,6 +128,11 @@ object AppSettings {
         Prefs.setUiStyle(ctx, v)
         _prefs.value = _prefs.value.copy(uiStyle = v)
     }
+
+    fun setLiquidGlassBar(ctx: Context, v: Boolean) {
+        Prefs.setLiquidGlassBar(ctx, v)
+        _prefs.value = _prefs.value.copy(liquidGlassBar = v)
+    }
 }
 
 val LocalIsEn = compositionLocalOf { false }
@@ -176,22 +181,40 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             SettingsCard(tr("界面风格", "UI Style")) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
+                OptionChips(
+                    options = listOf(
                         tr("Material 3（默认）", "Material 3 (Default)") to 0,
                         tr("MIUIX（HyperOS）", "MIUIX (HyperOS)") to 1,
-                    ).forEach { (label, v) ->
-                        FilterChip(
-                            selected = prefs.uiStyle == v,
-                            onClick = { AppSettings.setUiStyle(ctx, v) },
-                            label = { Text(label) },
-                        )
-                    }
+                    ),
+                    selected = prefs.uiStyle,
+                    onSelect = { AppSettings.setUiStyle(ctx, it) },
+                )
+                Text(
+                    tr(
+                        "即时生效，不影响任何采集与协议分析功能。MIUIX 风格采用 HyperOS 卡片分层、弹簧动效与精简底栏。",
+                        "Takes effect immediately without affecting any features. MIUIX brings HyperOS-style layered cards, spring motion, and a sleek bottom bar.",
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        tr("底栏液态玻璃效果", "Liquid Glass Bottom Bar"),
+                        Modifier.weight(1f),
+                    )
+                    AppSwitch(
+                        checked = prefs.liquidGlassBar,
+                        onCheckedChange = { AppSettings.setLiquidGlassBar(ctx, it) },
+                    )
                 }
                 Text(
                     tr(
-                        "即时生效，不影响任何采集与协议分析功能。MIUIX 风格采用 HyperOS 卡片分层、圆润胶囊控件与精简底栏。",
-                        "Takes effect immediately without affecting any features. MIUIX brings HyperOS-style layered cards, capsule controls, and a sleek bottom bar.",
+                        "默认关闭。开启后底部导航变为悬浮半透明液态玻璃胶囊，带折射高光边框与弹性滑块（Material 3 与 MIUIX 均适用）。",
+                        "Off by default. Turns the bottom bar into a floating translucent Liquid Glass capsule with specular rim and spring pill.",
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -199,19 +222,15 @@ fun SettingsScreen(
             }
 
             SettingsCard(tr("界面主题", "Theme")) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
+                OptionChips(
+                    options = listOf(
                         tr("跟随系统", "System") to 0,
                         tr("浅色", "Light") to 1,
                         tr("深色", "Dark") to 2,
-                    ).forEach { (label, v) ->
-                        FilterChip(
-                            selected = prefs.themeMode == v,
-                            onClick = { AppSettings.setTheme(ctx, v) },
-                            label = { Text(label) },
-                        )
-                    }
-                }
+                    ),
+                    selected = prefs.themeMode,
+                    onSelect = { AppSettings.setTheme(ctx, it) },
+                )
                 val dynSupported = Build.VERSION.SDK_INT >= 31
                 Row(
                     Modifier.fillMaxWidth(),
@@ -222,7 +241,7 @@ fun SettingsScreen(
                         tr("莫奈取色（动态配色）", "Dynamic Color (Material You)"),
                         Modifier.weight(1f),
                     )
-                    Switch(
+                    AppSwitch(
                         checked = dynSupported && prefs.dynamicColor,
                         enabled = dynSupported,
                         onCheckedChange = { AppSettings.setDynamicColor(ctx, it) },
@@ -243,7 +262,7 @@ fun SettingsScreen(
                         tr("OLED 纯黑背景", "OLED Pure Black"),
                         Modifier.weight(1f),
                     )
-                    Switch(
+                    AppSwitch(
                         checked = prefs.oledBlack,
                         onCheckedChange = { AppSettings.setOledBlack(ctx, it) },
                     )
@@ -256,20 +275,16 @@ fun SettingsScreen(
             }
 
             SettingsCard(tr("字体大小", "Font Size")) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
+                OptionChips(
+                    options = listOf(
                         tr("小", "Small") to 0,
                         tr("标准", "Normal") to 1,
                         tr("大", "Large") to 2,
                         tr("超大", "XL") to 3,
-                    ).forEach { (label, v) ->
-                        FilterChip(
-                            selected = prefs.fontTier == v,
-                            onClick = { AppSettings.setFontTier(ctx, v) },
-                            label = { Text(label) },
-                        )
-                    }
-                }
+                    ),
+                    selected = prefs.fontTier,
+                    onSelect = { AppSettings.setFontTier(ctx, it) },
+                )
                 Text(
                     tr("即时生效，按挡位缩放全应用文字。", "Takes effect immediately across all screens."),
                     style = MaterialTheme.typography.bodySmall,
@@ -287,7 +302,7 @@ fun SettingsScreen(
                         tr("侧滑返回时实时跟手缩放预览", "Follow-finger scale preview on back gesture"),
                         Modifier.weight(1f),
                     )
-                    Switch(
+                    AppSwitch(
                         checked = prefs.predictiveBack,
                         onCheckedChange = { AppSettings.setPredictiveBack(ctx, it) },
                     )
@@ -300,27 +315,19 @@ fun SettingsScreen(
             }
 
             SettingsCard(tr("语言 / Language", "Language / 语言")) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("中文" to "zh", "English" to "en").forEach { (label, code) ->
-                        FilterChip(
-                            selected = prefs.lang == code,
-                            onClick = { AppSettings.setLang(ctx, code) },
-                            label = { Text(label) },
-                        )
-                    }
-                }
+                OptionChips(
+                    options = listOf("中文" to "zh", "English" to "en"),
+                    selected = prefs.lang,
+                    onSelect = { AppSettings.setLang(ctx, it) },
+                )
             }
 
             SettingsCard(tr("软件更新源", "Update Source")) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("GitHub Releases" to 0, "GitHub Actions" to 1).forEach { (label, v) ->
-                        FilterChip(
-                            selected = prefs.updateSource == v,
-                            onClick = { AppSettings.setUpdateSource(ctx, v) },
-                            label = { Text(label) },
-                        )
-                    }
-                }
+                OptionChips(
+                    options = listOf("GitHub Releases" to 0, "GitHub Actions" to 1),
+                    selected = prefs.updateSource,
+                    onSelect = { AppSettings.setUpdateSource(ctx, it) },
+                )
                 Text(
                     updateUrl,
                     style = MaterialTheme.typography.bodySmall,
