@@ -98,7 +98,7 @@ fun OnboardingScreen(onFinish: () -> Unit) {
                 )
             } catch (_: Exception) {
             }
-            Prefs.setExportTreeUri(ctx, uri.toString())
+            AppSettings.setExportTreeUri(ctx, uri.toString())
             exportTreeUri = uri.toString()
         }
     }

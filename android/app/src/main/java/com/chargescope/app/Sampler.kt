@@ -695,6 +695,7 @@ object Sampler {
         val dual = Prefs.dualCell(app)
         val forceUa = Analyzer.usesMicroAmps(ring)
         val inp = Analyzer.input(s)
+        val currentMa = Analyzer.currentMa(s, forceUa)
         val powerMw = Analyzer.powerMw(s, dual, forceUa)
         val batW = powerMw?.div(1000.0)
         val inW = Analyzer.inputPowerW(inp)
@@ -707,6 +708,7 @@ object Sampler {
         if (recording) Recorder.append(app, s, powerMw, inp)
         _state.value = UiState(
             latest = s,
+            batteryCurrentMa = currentMa,
             batteryPowerW = batW,
             inputPowerW = inW,
             series = series,

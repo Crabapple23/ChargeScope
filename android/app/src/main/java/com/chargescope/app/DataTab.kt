@@ -67,7 +67,7 @@ private fun exportToAuthorizedTree(
         ?: return null
     ctx.contentResolver.openOutputStream(docUri)?.use(writer) ?: false
 } catch (_: SecurityException) {
-    Prefs.setExportTreeUri(ctx, null)
+    AppSettings.setExportTreeUri(ctx, null)
     null
 } catch (_: Exception) {
     null
@@ -95,7 +95,6 @@ internal fun DataTab() {
     var msg by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     var diskBytes by remember { mutableLongStateOf(0L) }
-    var exportTree by remember { mutableStateOf(Prefs.exportTreeUri(ctx)) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -258,7 +257,7 @@ internal fun DataTab() {
         Text(tr("已记录 $recordedRows 行，本机总占用约 ${fmtBytes(diskBytes)}（CSV 采用 GZIP 压缩存储，导出时自动解压）。应用无联网权限，导出不含设备标识。", "$recordedRows rows recorded, ~${fmtBytes(diskBytes)} on disk (GZIP compressed, auto-decompressed on export). Offline only."))
         Button(
             onClick = {
-                val tree = exportTree
+                val tree = prefs.exportTreeUri
                 if (tree != null) {
                     scope.launch {
                         val name = "chargescope-${exportTimestamp()}.csv"
@@ -268,7 +267,6 @@ internal fun DataTab() {
                         if (direct != null) {
                             msg = if (direct) "$csvOkMsg ($name)" else csvFailMsg
                         } else {
-                            exportTree = Prefs.exportTreeUri(ctx)
                             exportCsv.launch("chargescope.csv")
                         }
                     }
@@ -280,7 +278,7 @@ internal fun DataTab() {
         ) { Text(tr("导出 CSV 记录", "Export CSV")) }
         Button(
             onClick = {
-                val tree = exportTree
+                val tree = prefs.exportTreeUri
                 if (tree != null) {
                     scope.launch {
                         val name = "chargescope-log-${exportTimestamp()}.txt"
@@ -294,7 +292,6 @@ internal fun DataTab() {
                         if (direct != null) {
                             msg = if (direct) "$logOkMsg ($name)" else logFailMsg
                         } else {
-                            exportTree = Prefs.exportTreeUri(ctx)
                             exportLog.launch("chargescope-log.txt")
                         }
                     }
@@ -304,17 +301,14 @@ internal fun DataTab() {
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text(tr("导出诊断日志", "Export Diagnostic Log")) }
-        if (exportTree != null) {
+        if (prefs.exportTreeUri != null) {
             Text(
                 tr("已启用快捷导出目录：点击导出将直接写入已授权目录。", "Quick export folder active: exports write directly to your authorized folder."),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedButton(
-                onClick = {
-                    Prefs.setExportTreeUri(ctx, null)
-                    exportTree = null
-                },
+                onClick = { AppSettings.setExportTreeUri(ctx, null) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(tr("清除已授权导出目录（改回每次选择）", "Clear Export Folder (Ask Every Time)")) }
         }

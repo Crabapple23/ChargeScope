@@ -42,6 +42,7 @@ data class AppPrefs(
     val dynamicColor: Boolean = true,
     val oledBlack: Boolean = false,
     val dualCell: Boolean = false,
+    val exportTreeUri: String? = null,
 ) {
     val isEn: Boolean get() = lang == "en"
     val fontMultiplier: Float
@@ -71,6 +72,7 @@ object AppSettings {
             dynamicColor = Prefs.dynamicColor(ctx),
             oledBlack = Prefs.oledBlack(ctx),
             dualCell = Prefs.dualCell(ctx),
+            exportTreeUri = Prefs.exportTreeUri(ctx),
         )
     }
 
@@ -112,6 +114,11 @@ object AppSettings {
     fun setDualCell(ctx: Context, v: Boolean) {
         Prefs.setDualCell(ctx, v)
         _prefs.value = _prefs.value.copy(dualCell = v)
+    }
+
+    fun setExportTreeUri(ctx: Context, v: String?) {
+        Prefs.setExportTreeUri(ctx, v)
+        _prefs.value = _prefs.value.copy(exportTreeUri = v)
     }
 }
 

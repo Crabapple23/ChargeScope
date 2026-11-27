@@ -106,6 +106,7 @@ data class ArchiveEntry(
 
 data class UiState(
     val latest: Snapshot? = null,
+    val batteryCurrentMa: Double? = null,
     val batteryPowerW: Double? = null,
     val inputPowerW: Double? = null,
     val series: Series = Series.EMPTY,

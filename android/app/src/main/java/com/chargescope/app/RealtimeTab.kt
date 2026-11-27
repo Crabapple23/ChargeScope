@@ -51,7 +51,7 @@ internal fun RealtimeTab() {
         KV(tr("状态", "Status"), statusText(s?.status, isEn))
         KV(tr("连接方式", "Plugged"), s?.let { pluggedText(it.plugged, isEn) })
         KV(tr("电池端电压", "Battery Voltage"), fmt(s?.voltageMv?.let { it / 1000.0 }, "V"))
-        KV(tr("电池电流（绝对值）", "Battery Current"), fmt(s?.let { Analyzer.currentMa(it) }, "mA", 0))
+        KV(tr("电池电流（绝对值）", "Battery Current"), fmt(ui.batteryCurrentMa, "mA", 0))
         KV(tr("电池侧功率（估算）", "Battery Power (Est.)"), fmt(ui.batteryPowerW, "W"))
         KV(tr("输入侧功率（需 Root/Shizuku）", "Input Power (Root/Shizuku)"), fmt(ui.inputPowerW, "W"))
         Analyzer.efficiencyPct(ui.batteryPowerW, ui.inputPowerW)?.let { eff ->
