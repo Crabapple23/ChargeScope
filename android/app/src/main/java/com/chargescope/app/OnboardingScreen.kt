@@ -29,6 +29,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -73,6 +74,7 @@ fun OnboardingScreen(onFinish: () -> Unit) {
 
     var rootProvider by remember { mutableStateOf<RootScanner.Provider?>(null) }
     var selectedPriv by remember { mutableIntStateOf(Prefs.privMode(ctx)) }
+    val appPrefs by AppSettings.prefs.collectAsState()
     val shz by ShizukuBridge.stateFlow.collectAsState()
     val checking by Sampler.probing.collectAsState()
     val probeMsg by Sampler.probeMsg.collectAsState()
@@ -234,6 +236,8 @@ fun OnboardingScreen(onFinish: () -> Unit) {
                             selectedPriv = 0
                             Sampler.onPrivModeChanged(ctx, 0)
                         },
+                        dualCell = appPrefs.dualCell,
+                        onDualCellChanged = { Sampler.onDualCellChanged(ctx, it) },
                     )
                 }
             }
@@ -471,6 +475,8 @@ private fun PrivilegedStep(
     onProbeShizuku: () -> Unit,
     onRequestRoot: () -> Unit,
     onDisablePriv: () -> Unit,
+    dualCell: Boolean,
+    onDualCellChanged: (Boolean) -> Unit,
 ) {
     Text(
         tr(
@@ -558,6 +564,32 @@ private fun PrivilegedStep(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(tr("暂不启用特权（恢复仅公开 API）", "Disable Privileged Mode (Public API Only)"))
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (dualCell) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(tr("双电芯设备模式（可选）", "Dual-Cell Battery Mode (Optional)"), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                Switch(checked = dualCell, onCheckedChange = onDualCellChanged)
+            }
+            Text(
+                tr(
+                    "如果你的手机是串联双电芯（如多数 OPPO / 一加 / realme / iQOO 或百瓦快充机型），可在此开启；不开启也会在检测到双电芯特征时弹窗询问。",
+                    "Enable if your phone uses a 2S series dual-cell battery. If left off, the app will prompt you if dual-cell signals are detected.",
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 

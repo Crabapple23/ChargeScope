@@ -81,6 +81,12 @@ object Prefs {
 
     fun recordedRows(c: Context): Long = sp(c).getLong("recorded_rows", 0L)
     fun setRecordedRows(c: Context, v: Long) = sp(c).edit().putLong("recorded_rows", v).apply()
+
+    fun dualCell(c: Context): Boolean = sp(c).getBoolean("dual_cell", false)
+    fun setDualCell(c: Context, v: Boolean) = sp(c).edit().putBoolean("dual_cell", v).apply()
+
+    fun dualCellPrompted(c: Context): Boolean = sp(c).getBoolean("dual_cell_prompted", false)
+    fun setDualCellPrompted(c: Context, v: Boolean) = sp(c).edit().putBoolean("dual_cell_prompted", v).apply()
 }
 
 /**
@@ -385,6 +391,14 @@ object Sampler {
         if (text != null) AppLog.i("提示：$text")
     }
 
+    fun onDualCellChanged(ctx: Context, enabled: Boolean) {
+        val app = ctx.applicationContext
+        AppSettings.setDualCell(app, enabled)
+        Prefs.setDualCellPrompted(app, true)
+        AppLog.i(if (enabled) "双电芯模式：已开启" else "双电芯模式：已关闭")
+        bgScope.launch { sample(app) }
+    }
+
     /** Called immediately when the user switches privileged mode; runs on Sampler's own scope. */
     fun onPrivModeChanged(ctx: Context, mode: Int) {
         val app = ctx.applicationContext
@@ -619,15 +633,16 @@ object Sampler {
             ring[stripIdx] = ring[stripIdx].copy(rootNodes = emptyList())
         }
 
+        val dual = Prefs.dualCell(app)
         val inp = Analyzer.input(s)
-        val powerMw = Analyzer.powerMw(s)
+        val powerMw = Analyzer.powerMw(s, dual)
         val batW = powerMw?.div(1000.0)
         val inW = Analyzer.inputPowerW(inp)
         val batF = batW?.toFloat() ?: Float.NaN
         val inF = inW?.toFloat() ?: Float.NaN
         val series = pushSeries(batF, inF, s.elapsedMs)
 
-        val analysis = Analyzer.analyze(ring, Build.MANUFACTURER)
+        val analysis = Analyzer.analyze(ring, Build.MANUFACTURER, dual)
         trackArchive(s, analysis, inp, batF)
         if (recording) Recorder.append(app, s, powerMw, inp)
         _state.value = UiState(
@@ -636,7 +651,7 @@ object Sampler {
             inputPowerW = inW,
             series = series,
             analysis = analysis,
-            metrics = Analyzer.metrics(ring),
+            metrics = Analyzer.metrics(ring, dual),
             recording = recording,
             recordedRows = Recorder.rows,
             rootError = privError,

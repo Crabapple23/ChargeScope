@@ -142,10 +142,12 @@ object Analyzer {
     }
 
     /** Estimated battery-side power in mW (V x |I|). */
-    fun powerMw(s: Snapshot): Double? {
+    /** Battery-side power estimate in mW. In dual-cell mode, doubles single-cell voltage readings (<=5.5V). */
+    fun powerMw(s: Snapshot, dualCell: Boolean = false): Double? {
         val v = s.voltageMv ?: return null
         val i = currentMa(s) ?: return null
-        return v * i / 1000.0
+        val effV = if (dualCell && v <= 5500) v * 2.0 else v.toDouble()
+        return effV * i / 1000.0
     }
 
     private fun toMah(raw: Long?): Int? {
@@ -154,20 +156,18 @@ object Analyzer {
         return mah.takeIf { it in 500..25_000 }
     }
 
-    /** Factory design capacity (mAh): prefer sysfs/Health HAL `charge_full_design`, fallback to PowerProfile. */
-    fun designCapacityMah(s: Snapshot): Int? {
+    private fun rawDesignCapacityMah(s: Snapshot): Pair<Int?, Boolean> {
         for (n in s.rootNodes) {
             val t = n.props["type"]?.uppercase()
             val isBat = t == "BATTERY" || n.name == "battery" || n.name == "bms" || n.name == "health" ||
                 n.name == "qcom-battery" || n.name == "xm_power" || n.name == "oplus_chg"
             if (!isBat) continue
-            toMah(n.props["charge_full_design"]?.trim()?.toLongOrNull())?.let { return it }
+            toMah(n.props["charge_full_design"]?.trim()?.toLongOrNull())?.let { return it to true }
         }
-        return s.designCapacityMah?.takeIf { it in 500..25_000 }
+        return s.designCapacityMah?.takeIf { it in 500..25_000 } to false
     }
 
-    /** Current usable full-charge capacity (mAh) from sysfs `charge_full` or Shizuku learned capacity. */
-    fun usableCapacityMah(s: Snapshot): Int? {
+    private fun rawUsableCapacityMah(s: Snapshot): Int? {
         for (n in s.rootNodes) {
             val t = n.props["type"]?.uppercase()
             val isBat = t == "BATTERY" || n.name == "battery" || n.name == "bms" || n.name == "health" ||
@@ -178,8 +178,62 @@ object Analyzer {
         return null
     }
 
+    /**
+     * Detects signals suggesting a 2S series dual-cell battery (for prompting the user when dual-cell mode is off).
+     * Returns a human-readable reason string, or null if no dual-cell signal is present.
+     */
+    fun detectDualCellReason(s: Snapshot?): String? {
+        if (s == null) return null
+        if (s.voltageMv != null && s.voltageMv > 5500) {
+            return "检测到电池端电压 %.2f V（高于单电芯 5.5 V 上限），疑似 2S 串联双电芯设备。".format(s.voltageMv / 1000.0)
+        }
+        val dualNode = s.rootNodes.firstOrNull { n ->
+            val lower = n.name.lowercase()
+            lower == "assist_battery" || lower == "sub_battery" || lower == "bms_slave" ||
+                lower == "battery_slave" || lower == "slave_battery"
+        }
+        if (dualNode != null) {
+            return "检测到双电芯辅助电池节点（${dualNode.name}），疑似串联双电芯设备。"
+        }
+        val (design, fromNode) = rawDesignCapacityMah(s)
+        val usable = rawUsableCapacityMah(s)
+        if (!fromNode && design != null && usable != null) {
+            val ratio = usable.toDouble() / design
+            if (ratio in 0.35..0.62 || ratio in 1.40..2.20) {
+                return "电池可用上限容量（${usable} mAh）与设计容量（${design} mAh）呈约 2 倍差异，疑似双电芯单/双芯口径不同。"
+            }
+        }
+        return null
+    }
+
+    /** Factory design capacity (mAh), normalized to equivalent 2S total capacity when dualCell is enabled. */
+    fun designCapacityMah(s: Snapshot, dualCell: Boolean = false): Int? {
+        val (rawDesign, _) = rawDesignCapacityMah(s)
+        if (rawDesign == null || !dualCell) return rawDesign
+        val rawUsable = rawUsableCapacityMah(s)
+        return when {
+            rawUsable != null && rawUsable.toDouble() / rawDesign in 1.40..2.20 -> rawDesign * 2
+            rawUsable != null && rawDesign <= 3500 && rawUsable <= 3500 -> rawDesign * 2
+            rawUsable == null && rawDesign <= 3500 -> rawDesign * 2
+            else -> rawDesign
+        }
+    }
+
+    /** Current usable full-charge capacity (mAh), normalized to equivalent 2S total capacity when dualCell is enabled. */
+    fun usableCapacityMah(s: Snapshot, dualCell: Boolean = false): Int? {
+        val rawUsable = rawUsableCapacityMah(s) ?: return null
+        if (!dualCell) return rawUsable
+        val (rawDesign, _) = rawDesignCapacityMah(s)
+        return when {
+            rawDesign != null && rawUsable.toDouble() / rawDesign in 0.35..0.62 -> rawUsable * 2
+            rawDesign != null && rawDesign <= 3500 && rawUsable <= 3500 -> rawUsable * 2
+            rawDesign == null && rawUsable <= 3500 -> rawUsable * 2
+            else -> rawUsable
+        }
+    }
+
     /** Battery health percentage: prefer fuel-gauge `soh` across battery/vendor/health nodes, else `usable / design`. */
-    fun batteryHealthPct(s: Snapshot): Int? {
+    fun batteryHealthPct(s: Snapshot, dualCell: Boolean = false): Int? {
         for (n in s.rootNodes) {
             val t = n.props["type"]?.uppercase()
             val isBat = t == "BATTERY" || n.name == "battery" || n.name == "bms" || n.name == "health" ||
@@ -187,8 +241,8 @@ object Analyzer {
             if (!isBat) continue
             n.props["soh"]?.trim()?.toIntOrNull()?.takeIf { it in 1..100 }?.let { return it }
         }
-        val usable = usableCapacityMah(s)
-        val design = designCapacityMah(s)
+        val usable = usableCapacityMah(s, dualCell)
+        val design = designCapacityMah(s, dualCell)
         if (usable != null && design != null) {
             val pct = (usable * 100.0 / design).roundToLong().toInt()
             if (pct in 10..120) return pct.coerceAtMost(100)
@@ -424,7 +478,7 @@ object Analyzer {
         }
     }
 
-    fun analyze(window: List<Snapshot>, maker: String? = null): Analysis {
+    fun analyze(window: List<Snapshot>, maker: String? = null, dualCell: Boolean = false): Analysis {
         val last = window.lastOrNull()
             ?: return Analysis(Status.UNKNOWN, "暂无数据", emptyList(), emptyList())
         val limits = mutableListOf(
@@ -591,7 +645,7 @@ object Analyzer {
         // Smoothed battery-side power over the last <=10 samples.
         var pbSum = 0.0; var pbN = 0
         for (idx in (window.size - 10).coerceAtLeast(0) until window.size) {
-            powerMw(window[idx])?.let { pbSum += it; pbN++ }
+            powerMw(window[idx], dualCell)?.let { pbSum += it; pbN++ }
         }
         val batAvgW = if (pbN > 0) pbSum / pbN / 1000.0 else null
         val advVv = advV?.let { it / 1e6 }
@@ -676,7 +730,7 @@ object Analyzer {
         }
 
         // L2 / L1 references.
-        val batMw = powerMw(last)
+        val batMw = powerMw(last, dualCell)
         if (batMw != null && batMw >= 15_000.0) {
             evidence += Evidence(2, "电池侧估算功率约 %.1f W（仅参考，不能确认协议）".format(batMw / 1000.0))
         }
@@ -785,7 +839,7 @@ object Analyzer {
         }
     }
 
-    fun metrics(list: List<Snapshot>): Metrics {
+    fun metrics(list: List<Snapshot>, dualCell: Boolean = false): Metrics {
         if (list.isEmpty()) return Metrics(0, 0, null, null, null, null)
         var pSum = 0.0; var pN = 0; var peak: Double? = null
         var tSum = 0.0; var tN = 0
@@ -793,7 +847,7 @@ object Analyzer {
         var lastLvl: Snapshot? = null
         for (i in list.indices) {
             val s = list[i]
-            powerMw(s)?.let {
+            powerMw(s, dualCell)?.let {
                 pSum += it; pN++
                 val pk = peak
                 if (pk == null || it > pk) peak = it

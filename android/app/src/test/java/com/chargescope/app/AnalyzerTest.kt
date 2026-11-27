@@ -168,6 +168,31 @@ class AnalyzerTest {
         assertEquals(86, Analyzer.batteryHealthPct(s))
     }
 
+    @Test fun dualCellModeDoublesSingleCellPowerAndNormalizesCapacity() {
+        val health = RootNode("health", mapOf("charge_full" to "2350000"))
+        val s = snap(listOf(health), ua = -5_000_000L, mv = 4200).copy(designCapacityMah = 5000)
+        // Single-cell: raw 4.2V * 5A = 21W, raw usable 2350 / 5000 = 47%
+        assertEquals(21_000.0, Analyzer.powerMw(s, dualCell = false)!!, 0.01)
+        assertEquals(2350, Analyzer.usableCapacityMah(s, dualCell = false))
+        // Dual-cell: 8.4V * 5A = 42W, equivalent usable 4700 / 5000 = 94%
+        assertEquals(42_000.0, Analyzer.powerMw(s, dualCell = true)!!, 0.01)
+        assertEquals(4700, Analyzer.usableCapacityMah(s, dualCell = true))
+        assertEquals(5000, Analyzer.designCapacityMah(s, dualCell = true))
+        assertEquals(94, Analyzer.batteryHealthPct(s, dualCell = true))
+        // When voltage is already reported as series (>5.5V), do not double again
+        val s8v = s.copy(voltageMv = 8400)
+        assertEquals(42_000.0, Analyzer.powerMw(s8v, dualCell = true)!!, 0.01)
+    }
+
+    @Test fun dualCellDetectorTriggersOnVoltageSlaveNodeOrHalfCapacity() {
+        assertTrue(Analyzer.detectDualCellReason(snap(mv = 8400)) != null)
+        assertTrue(Analyzer.detectDualCellReason(snap(listOf(RootNode("assist_battery", mapOf("status" to "Charging"))))) != null)
+        val halfCap = snap(listOf(RootNode("health", mapOf("charge_full" to "2350000")))).copy(designCapacityMah = 5000)
+        assertTrue(Analyzer.detectDualCellReason(halfCap) != null)
+        val normal = snap(listOf(RootNode("health", mapOf("charge_full" to "4307000")))).copy(designCapacityMah = 5000)
+        assertNull(Analyzer.detectDualCellReason(normal))
+    }
+
     @Test fun parseRootOutput() {
         val nodes = RootScanner.parse("@@usb\ntype=USB\nonline=1\n@@battery\ncapacity=50\n")
         assertEquals(2, nodes.size)

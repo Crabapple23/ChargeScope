@@ -208,7 +208,7 @@ object Report {
         line("## 设置")
         line("特权通道：" + when (Prefs.privMode(ctx)) { 1 -> "Root"; 2 -> "Shizuku"; else -> "关闭" })
         line("Shizuku 状态：" + ShizukuBridge.state().label)
-        line("采样间隔：${Prefs.intervalMs(ctx)} ms；自动记录：${Prefs.autoRecord(ctx)}")
+        line("采样间隔：${Prefs.intervalMs(ctx)} ms；自动记录：${Prefs.autoRecord(ctx)}；双电芯模式：${Prefs.dualCell(ctx)}")
         line("阈值：温度 ${Prefs.long(ctx, Prefs.TEMP, 45L)}°C，时长 ${Prefs.long(ctx, Prefs.MINUTES, 120L)} 分钟，" +
             "电量 ${Prefs.long(ctx, Prefs.SOC, 100L)}%，文件 ${Prefs.long(ctx, Prefs.FILE_MB, 8L)} MB")
         ui.rootError?.let { line("特权通道错误：$it") }
@@ -219,7 +219,7 @@ object Report {
             line("电量 ${s.levelPct ?: "—"}%  状态码 ${s.status ?: "—"}  连接 ${s.plugged}  健康码 ${s.health ?: "—"}")
             val curMa = Analyzer.currentMa(s)?.let { "（换算 %.0f mA）".format(it) } ?: ""
             line("电压 ${s.voltageMv ?: "—"} mV  温度 ${s.tempDeci ?: "—"} (0.1°C)  电流原始值 ${s.currentUa ?: "—"}$curMa  平均电流 ${s.currentAvgUa ?: "—"}")
-            Analyzer.powerMw(s)?.let { line("电池侧估算功率 %.0f mW".format(it)) }
+            Analyzer.powerMw(s, Prefs.dualCell(ctx))?.let { line("电池侧估算功率 %.0f mW".format(it)) }
             for (n in s.rootNodes) line("[${n.name}] " + n.props.entries.joinToString(" ") { "${it.key}=${it.value}" })
         }
         line()

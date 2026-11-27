@@ -41,6 +41,7 @@ data class AppPrefs(
     val predictiveBack: Boolean = true,
     val dynamicColor: Boolean = true,
     val oledBlack: Boolean = false,
+    val dualCell: Boolean = false,
 ) {
     val isEn: Boolean get() = lang == "en"
     val fontMultiplier: Float
@@ -69,6 +70,7 @@ object AppSettings {
             predictiveBack = Prefs.predictiveBack(ctx),
             dynamicColor = Prefs.dynamicColor(ctx),
             oledBlack = Prefs.oledBlack(ctx),
+            dualCell = Prefs.dualCell(ctx),
         )
     }
 
@@ -105,6 +107,11 @@ object AppSettings {
     fun setOledBlack(ctx: Context, v: Boolean) {
         Prefs.setOledBlack(ctx, v)
         _prefs.value = _prefs.value.copy(oledBlack = v)
+    }
+
+    fun setDualCell(ctx: Context, v: Boolean) {
+        Prefs.setDualCell(ctx, v)
+        _prefs.value = _prefs.value.copy(dualCell = v)
     }
 }
 

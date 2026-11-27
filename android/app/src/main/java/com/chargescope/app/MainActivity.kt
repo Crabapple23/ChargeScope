@@ -156,6 +156,10 @@ private fun App() {
     var tab by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
     var showOnboarding by remember { mutableStateOf(!Prefs.onboardingDone(ctx)) }
+    var dualCellPrompted by remember { mutableStateOf(Prefs.dualCellPrompted(ctx)) }
+    val dualCellReason by remember {
+        Sampler.state.map { Analyzer.detectDualCellReason(it.latest) }.distinctUntilChanged()
+    }.collectAsState(null)
     var backProgress by remember { mutableFloatStateOf(0f) }
     var backEdge by remember { mutableIntStateOf(0) }
     var lastProtocolTapMs by remember { mutableLongStateOf(0L) }
@@ -318,6 +322,35 @@ private fun App() {
                         },
                     )
                 }
+                if (!showOnboarding && !prefs.dualCell && !dualCellPrompted && dualCellReason != null) {
+                    AlertDialog(
+                        onDismissRequest = {
+                            dualCellPrompted = true
+                            Prefs.setDualCellPrompted(ctx, true)
+                        },
+                        title = { Text(tr("检测到可能为双电芯设备", "Possible Dual-Cell Device")) },
+                        text = {
+                            Text(
+                                dualCellReason + "\n\n" + tr(
+                                    "是否切换为双电芯算法计算功率与容量？（后续可随时在「数据 → 双电芯设备模式」中修改）",
+                                    "Switch to dual-cell math for power & capacity? (You can change this anytime under Data → Dual-Cell Battery Mode)",
+                                ),
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                dualCellPrompted = true
+                                Sampler.onDualCellChanged(ctx, true)
+                            }) { Text(tr("使用双电芯算法", "Use Dual-Cell")) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = {
+                                dualCellPrompted = true
+                                Prefs.setDualCellPrompted(ctx, true)
+                            }) { Text(tr("保持单电芯算法", "Keep Single-Cell")) }
+                        },
+                    )
+                }
             }
         }
     }
@@ -397,10 +430,15 @@ private fun healthText(h: Int?, isEn: Boolean = false) = if (isEn) when (h) {
 @Composable
 private fun RealtimeTab() {
     val ui by Sampler.state.collectAsState()
+    val prefs by AppSettings.prefs.collectAsState()
     val ctx = LocalContext.current
     val isEn = LocalIsEn.current
     val s = ui.latest
-    Section(tr("电池（公开 API）", "Battery (Public API)")) {
+    val dual = prefs.dualCell
+    Section(
+        if (dual) tr("电池（公开 API · 双电芯）", "Battery (Public API · Dual-Cell)")
+        else tr("电池（公开 API）", "Battery (Public API)"),
+    ) {
         KV(tr("电量", "Level"), s?.levelPct?.let { "$it %" })
         KV(tr("状态", "Status"), statusText(s?.status, isEn))
         KV(tr("连接方式", "Plugged"), s?.let { pluggedText(it.plugged, isEn) })
@@ -413,9 +451,9 @@ private fun RealtimeTab() {
         }
         KV(tr("温度", "Temperature"), fmt(s?.tempDeci?.let { it / 10.0 }, "°C", 1))
         val hText = healthText(s?.health, isEn)
-        val hPct = s?.let { Analyzer.batteryHealthPct(it) }
-        val designMah = s?.let { Analyzer.designCapacityMah(it) }
-        val usableMah = s?.let { Analyzer.usableCapacityMah(it) }
+        val hPct = s?.let { Analyzer.batteryHealthPct(it, dual) }
+        val designMah = s?.let { Analyzer.designCapacityMah(it, dual) }
+        val usableMah = s?.let { Analyzer.usableCapacityMah(it, dual) }
         val cycles = s?.let { Analyzer.batteryCycleCount(it) }
         val healthDisplay = buildList {
             if (hText != null) add(hText)
@@ -995,6 +1033,7 @@ private fun DataTab() {
         SamplingService.send(ctx, SamplingService.ACTION_ARM)
     }
 
+    val prefs by AppSettings.prefs.collectAsState()
     val isEn = LocalIsEn.current
     val intervalOpts = remember(isEn) {
         if (isEn) listOf("1s" to 1000L, "2s" to 2000L, "5s" to 5000L) else INTERVAL_OPTS
@@ -1026,6 +1065,23 @@ private fun DataTab() {
             })
         }
         Text(tr("开启后会常驻一条低优先级通知（空闲时不采样）。系统重启后需打开一次应用以恢复。", "Shows a low-priority notification while idle (no sampling). Open the app once after reboot to re-arm."), style = MaterialTheme.typography.bodySmall)
+    }
+    Fold(tr("双电芯设备模式", "Dual-Cell Battery Mode"), if (prefs.dualCell) tr("已开启", "On") else tr("已关闭", "Off")) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(tr("按 2S 串联双电芯算法计算功率与容量", "Use 2S dual-cell math for power & capacity"), Modifier.weight(1f))
+            Switch(
+                checked = prefs.dualCell,
+                onCheckedChange = { Sampler.onDualCellChanged(ctx, it) },
+            )
+        }
+        Text(
+            tr(
+                "适用于 OPPO / 一加 / realme / iQOO / 部分百瓦快充等串联双电芯机型。开启后自动按双电芯等效换算电池侧功率与容量；关闭时若自动检测到双电芯特征会弹窗询问。",
+                "For 2S series dual-cell phones. Normalizes battery-side power and capacity when enabled; prompts automatically if dual-cell signals are detected while off.",
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
     Fold(
         tr("安全阈值", "Safety Limits"),
