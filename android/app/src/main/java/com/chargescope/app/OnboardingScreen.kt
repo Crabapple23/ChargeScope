@@ -448,7 +448,7 @@ private fun StepWelcomeAndStyle(
             Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Text(tr("底栏液态玻璃效果", "Liquid Glass Bottom Bar"), style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    tr("悬浮半透明玻璃胶囊底栏，默认关闭", "Floating translucent capsule bar, off by default"),
+                    tr("悬浮半透明玻璃胶囊底栏，M3 与 MIUIX 独立保存", "Floating glass capsule bar, saved per style"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -42,10 +42,12 @@ data class AppPrefs(
     val dualCell: Boolean = false,
     val exportTreeUri: String? = null,
     val uiStyle: Int = 0, // 0 = Material 3, 1 = MIUIX
-    val liquidGlassBar: Boolean = false,
+    val liquidGlassM3: Boolean = false,
+    val liquidGlassMiuix: Boolean = false,
 ) {
     val isEn: Boolean get() = lang == "en"
     val isMiuix: Boolean get() = uiStyle == 1
+    val liquidGlassBar: Boolean get() = if (isMiuix) liquidGlassMiuix else liquidGlassM3
     val fontMultiplier: Float
         get() = when (fontTier) {
             0 -> 0.88f
@@ -75,7 +77,8 @@ object AppSettings {
             dualCell = Prefs.dualCell(ctx),
             exportTreeUri = Prefs.exportTreeUri(ctx),
             uiStyle = Prefs.uiStyle(ctx),
-            liquidGlassBar = Prefs.liquidGlassBar(ctx),
+            liquidGlassM3 = Prefs.liquidGlassM3(ctx),
+            liquidGlassMiuix = Prefs.liquidGlassMiuix(ctx),
         )
     }
 
@@ -130,8 +133,13 @@ object AppSettings {
     }
 
     fun setLiquidGlassBar(ctx: Context, v: Boolean) {
-        Prefs.setLiquidGlassBar(ctx, v)
-        _prefs.value = _prefs.value.copy(liquidGlassBar = v)
+        if (_prefs.value.isMiuix) {
+            Prefs.setLiquidGlassMiuix(ctx, v)
+            _prefs.value = _prefs.value.copy(liquidGlassMiuix = v)
+        } else {
+            Prefs.setLiquidGlassM3(ctx, v)
+            _prefs.value = _prefs.value.copy(liquidGlassM3 = v)
+        }
     }
 }
 
@@ -213,8 +221,8 @@ fun SettingsScreen(
                 }
                 Text(
                     tr(
-                        "默认关闭。开启后底部导航变为悬浮半透明液态玻璃胶囊，带折射高光边框与弹性滑块（Material 3 与 MIUIX 均适用）。",
-                        "Off by default. Turns the bottom bar into a floating translucent Liquid Glass capsule with specular rim and spring pill.",
+                        "默认关闭。开启后底部导航变为悬浮半透明液态玻璃胶囊；Material 3 与 MIUIX 两种风格的开关状态分别独立保存。",
+                        "Off by default. Turns the bottom bar into a floating translucent Liquid Glass capsule; saved independently for Material 3 and MIUIX.",
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

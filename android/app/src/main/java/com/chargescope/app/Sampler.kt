@@ -92,8 +92,11 @@ object Prefs {
     fun uiStyle(c: Context): Int = sp(c).getInt("ui_style", 0)
     fun setUiStyle(c: Context, v: Int) = sp(c).edit().putInt("ui_style", v).apply()
 
-    fun liquidGlassBar(c: Context): Boolean = sp(c).getBoolean("liquid_glass_bar", false)
-    fun setLiquidGlassBar(c: Context, v: Boolean) = sp(c).edit().putBoolean("liquid_glass_bar", v).apply()
+    fun liquidGlassM3(c: Context): Boolean = sp(c).getBoolean("liquid_glass_m3", false)
+    fun setLiquidGlassM3(c: Context, v: Boolean) = sp(c).edit().putBoolean("liquid_glass_m3", v).apply()
+
+    fun liquidGlassMiuix(c: Context): Boolean = sp(c).getBoolean("liquid_glass_miuix", false)
+    fun setLiquidGlassMiuix(c: Context, v: Boolean) = sp(c).edit().putBoolean("liquid_glass_miuix", v).apply()
 }
 
 /**
