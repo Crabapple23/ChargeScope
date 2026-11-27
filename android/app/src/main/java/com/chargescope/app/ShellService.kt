@@ -75,23 +75,92 @@ class ShellService : IShellService.Stub() {
             }
         }
         sb.append("@@dumpsys\n")
-        try {
-            val p = ProcessBuilder("dumpsys", "battery").redirectErrorStream(false).start()
-            p.outputStream.close()
-            p.inputStream.bufferedReader().use { r ->
-                while (true) {
-                    val line = r.readLine() ?: break
-                    sb.append(line).append('\n')
-                }
-            }
-            if (!p.waitFor(3, TimeUnit.SECONDS)) p.destroyForcibly()
-        } catch (_: Exception) {
+        val dumpBat = runCmd("dumpsys", "battery", timeoutSec = 3, maxChars = 4096)
+        if (dumpBat.isNotEmpty()) sb.append(dumpBat).append('\n')
+
+        val healthBlock = collectHealthSummary()
+        if (healthBlock.isNotEmpty()) {
+            sb.append("@@health\n").append(healthBlock)
         }
         return sb.toString()
     }
 
+    @Volatile private var cachedHealthBlock: String = ""
+    @Volatile private var cachedHealthAtMs: Long = 0L
+
+    private fun collectHealthSummary(): String {
+        val now = System.currentTimeMillis()
+        if (now - cachedHealthAtMs < 30_000L && cachedHealthBlock.isNotEmpty()) {
+            return cachedHealthBlock
+        }
+        val map = LinkedHashMap<String, String>()
+
+        fun parseKeyNum(text: String, regex: Regex): Long? =
+            regex.find(text)?.groupValues?.getOrNull(1)?.toLongOrNull()
+
+        val ihealth = runCmd("dumpsys", "android.hardware.health.IHealth/default", timeoutSec = 3, maxChars = 8192)
+        val bprops = if (ihealth.isBlank()) {
+            runCmd("dumpsys", "batteryproperties", timeoutSec = 3, maxChars = 4096)
+        } else ""
+        val combined = "$ihealth\n$bprops"
+
+        parseKeyNum(combined, Regex("""(?i)(?:batteryStateOfHealth|stateOfHealth)\s*[:=]\s*(\d+)"""))
+            ?.takeIf { it in 1..100 }
+            ?.let { map["soh"] = it.toString() }
+        parseKeyNum(combined, Regex("""(?i)(?:batteryCycleCount|cycleCount)\s*[:=]\s*(\d+)"""))
+            ?.takeIf { it >= 0 }
+            ?.let { map["cycle_count"] = it.toString() }
+        parseKeyNum(combined, Regex("""(?i)batteryFullCharge\s*[:=]\s*(\d+)"""))
+            ?.takeIf { it > 0 }
+            ?.let { map["charge_full"] = it.toString() }
+        parseKeyNum(combined, Regex("""(?i)batteryFullChargeDesignCapacityUah\s*[:=]\s*(\d+)"""))
+            ?.takeIf { it > 0 }
+            ?.let { map["charge_full_design"] = it.toString() }
+
+        // Fallback: extract Android's learned vs nominal battery capacity from batterystats.
+        if (!map.containsKey("soh") && (!map.containsKey("charge_full") || !map.containsKey("charge_full_design"))) {
+            val stats = runCmd("dumpsys", "batterystats", "--charged", timeoutSec = 3, maxChars = 16_384)
+            if (stats.isNotEmpty()) {
+                val cap = Regex("""(?i)Capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                val learnedMax = Regex("""(?i)Max learned battery capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                val learnedMin = Regex("""(?i)Min learned battery capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                val estCap = Regex("""(?i)Estimated battery capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                val learned = learnedMax ?: estCap ?: learnedMin
+                if (cap != null && cap in 500..20_000) {
+                    map.putIfAbsent("charge_full_design", (cap * 1000L).toString())
+                }
+                if (learned != null && learned in 500..20_000) {
+                    map.putIfAbsent("charge_full", (learned * 1000L).toString())
+                }
+            }
+        }
+
+        val out = buildString {
+            for ((k, v) in map) append(k).append('=').append(v).append('\n')
+        }
+        cachedHealthBlock = out
+        cachedHealthAtMs = now
+        return out
+    }
+
+    private fun runCmd(vararg cmd: String, timeoutSec: Long = 3, maxChars: Int = 16_000): String = try {
+        val p = ProcessBuilder(*cmd).redirectErrorStream(false).start()
+        p.outputStream.close()
+        val sb = StringBuilder(2048)
+        p.inputStream.bufferedReader().use { r ->
+            while (sb.length < maxChars) {
+                val line = r.readLine() ?: break
+                sb.append(line.replace("\u0000", "")).append('\n')
+            }
+        }
+        if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) p.destroyForcibly()
+        sb.toString().trimEnd()
+    } catch (_: Exception) {
+        ""
+    }
+
     private fun deepProbe(): String {
-        val sb = StringBuilder(8192)
+        val sb = StringBuilder(16_384)
         sb.append("#uid=").append(Process.myUid()).append('\n')
         val roots = ArrayList<File>()
         try { File("/sys/class/power_supply").listFiles()?.let { roots.addAll(it) } } catch (_: Exception) {}
@@ -110,6 +179,40 @@ class ShellService : IShellService.Stub() {
                 if (n == "uevent" || n == "modalias" || n == "waiting_for_supplier" || n.startsWith("wakeup")) continue
                 val v = readFirstLine(f)
                 if (!v.isNullOrEmpty()) sb.append(n).append('=').append(v.take(120)).append('\n')
+            }
+        }
+
+        // Binder-based dumpsys & getprop (accessible to Shizuku uid=2000 even when sysfs is SELinux-restricted).
+        val ihealth = runCmd("dumpsys", "android.hardware.health.IHealth/default", timeoutSec = 3, maxChars = 4096)
+        if (ihealth.isNotEmpty()) {
+            sb.append("=== dumpsys IHealth ===\n").append(ihealth).append('\n')
+        }
+        val bprops = runCmd("dumpsys", "batteryproperties", timeoutSec = 3, maxChars = 2048)
+        if (bprops.isNotEmpty()) {
+            sb.append("=== dumpsys batteryproperties ===\n").append(bprops).append('\n')
+        }
+        val usbRaw = runCmd("dumpsys", "usb", timeoutSec = 3, maxChars = 16_384)
+        if (usbRaw.isNotEmpty()) {
+            val usbRegex = Regex("""(?i)(port|role|power|mode|connect|pd|brick|contaminant|typec|charg|curr|volt|status)""")
+            val usbLines = usbRaw.lineSequence().filter { usbRegex.containsMatchIn(it) }.take(60).joinToString("\n")
+            if (usbLines.isNotEmpty()) {
+                sb.append("=== dumpsys usb ===\n").append(usbLines.take(3000)).append('\n')
+            }
+        }
+        val statsRaw = runCmd("dumpsys", "batterystats", "--charged", timeoutSec = 3, maxChars = 16_384)
+        if (statsRaw.isNotEmpty()) {
+            val statsRegex = Regex("""(?i)(capacity|estimated|learned|cycle|health|charge)""")
+            val statsLines = statsRaw.lineSequence().filter { statsRegex.containsMatchIn(it) }.take(40).joinToString("\n")
+            if (statsLines.isNotEmpty()) {
+                sb.append("=== dumpsys batterystats (capacity) ===\n").append(statsLines.take(2000)).append('\n')
+            }
+        }
+        val propsRaw = runCmd("getprop", timeoutSec = 3, maxChars = 65_536)
+        if (propsRaw.isNotEmpty()) {
+            val propRegex = Regex("""(?i)(charg|batt|fastchg|vooc|superchg|ufcs|pps|quick_charge|pd\.|miui\.power|hw\.power|oplus\.chg|vivo\.chg)""")
+            val propLines = propsRaw.lineSequence().filter { propRegex.containsMatchIn(it) }.take(80).joinToString("\n")
+            if (propLines.isNotEmpty()) {
+                sb.append("=== getprop (charging) ===\n").append(propLines.take(4000)).append('\n')
             }
         }
         return sb.toString()

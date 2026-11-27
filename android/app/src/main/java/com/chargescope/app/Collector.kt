@@ -287,9 +287,9 @@ object RootScanner {
                 name = line.substring(2).trim()
                 props = LinkedHashMap()
             } else {
-                // Support both `key=value` (sysfs) and `key: value` (raw `dumpsys battery`).
+                // Support both `key=value` (sysfs/health) and `key: value` (raw `dumpsys battery`).
                 val eq = line.indexOf('=')
-                val sep = if (eq > 0) eq else if (name == "dumpsys") line.indexOf(':') else -1
+                val sep = if (eq > 0) eq else if (name == "dumpsys" || name == "health") line.indexOf(':') else -1
                 if (sep > 0) {
                     val k = line.substring(0, sep).trim().lowercase().replace(' ', '_')
                     val v = line.substring(sep + 1).trim()

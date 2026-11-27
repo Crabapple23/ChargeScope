@@ -154,7 +154,7 @@ object Analyzer {
         var design: Long? = null
         for (n in s.rootNodes) {
             val t = n.props["type"]?.uppercase()
-            val isBat = t == "BATTERY" || n.name == "battery" || n.name == "bms" ||
+            val isBat = t == "BATTERY" || n.name == "battery" || n.name == "bms" || n.name == "health" ||
                 n.name == "qcom-battery" || n.name == "xm_power" || n.name == "oplus_chg"
             if (!isBat) continue
             n.props["soh"]?.trim()?.toIntOrNull()?.takeIf { it in 1..100 }?.let { return it }
@@ -168,11 +168,13 @@ object Analyzer {
         return null
     }
 
-    /** Battery cycle count from sysfs (null if unavailable). */
+    /** Battery cycle count from sysfs or Health HAL (null if unavailable). */
     fun batteryCycleCount(s: Snapshot): Int? {
         for (n in s.rootNodes) {
             val t = n.props["type"]?.uppercase()
-            if (t != "BATTERY" && n.name != "battery" && n.name != "bms") continue
+            val isBat = t == "BATTERY" || n.name == "battery" || n.name == "bms" || n.name == "health" ||
+                n.name == "qcom-battery" || n.name == "xm_power" || n.name == "oplus_chg"
+            if (!isBat) continue
             n.props["cycle_count"]?.trim()?.toIntOrNull()?.takeIf { it >= 0 }?.let { return it }
         }
         return null
@@ -653,7 +655,7 @@ object Analyzer {
         if (brand != null) {
             evidence += Evidence(1, "本机品牌 $brand，常见私有协议：${BRAND_PROTOCOLS[brand]}（仅缩小范围）")
         }
-        val dumpsysOnly = last.rootNodes.isNotEmpty() && last.rootNodes.all { it.name == "dumpsys" }
+        val dumpsysOnly = last.rootNodes.isNotEmpty() && last.rootNodes.all { it.name == "dumpsys" || it.name == "health" }
         if (last.rootNodes.isEmpty()) {
             limits += "未启用 Root / Shizuku 或无法读取 sysfs：只有电池侧数据，无法识别协议。"
         } else if (dumpsysOnly) {

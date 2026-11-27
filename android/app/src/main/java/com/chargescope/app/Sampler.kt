@@ -335,15 +335,28 @@ object Sampler {
                 } else {
                     val trimmed = text?.trim().orEmpty()
                     val allLines = trimmed.lines()
-                    val dirCount = allLines.count { it.startsWith("=== ") }
-                    val kvCount = allLines.count { l -> !l.startsWith("#") && !l.startsWith("=== ") && l.contains('=') }
+                    var sysfsDirs = 0
+                    var sysfsKv = 0
+                    var serviceLines = 0
+                    var inSysfs = false
+                    for (l in allLines) {
+                        when {
+                            l.startsWith("=== /sys/") -> { sysfsDirs++; inSysfs = true }
+                            l.startsWith("=== ") -> { inSysfs = false }
+                            l.startsWith("#") || l.isBlank() -> Unit
+                            inSysfs && l.contains('=') -> sysfsKv++
+                            !inSysfs -> serviceLines++
+                        }
+                    }
                     _deepScan.value = when {
                         trimmed.isEmpty() -> "未发现可读节点"
-                        dirCount > 0 && kvCount == 0 ->
-                            "检测到 $dirCount 个充电节点目录，但未能读取到任何键值（常见原因：Android 14+ SELinux 限制 Shizuku uid=2000 读取 sysfs，需 Root 权限）。\n\n$trimmed"
+                        sysfsDirs > 0 && sysfsKv == 0 && serviceLines == 0 ->
+                            "检测到 $sysfsDirs 个充电节点目录，但未能读取到任何键值（常见原因：Android 14+ SELinux 限制 Shizuku uid=2000 读取 sysfs，需 Root 权限）。\n\n$trimmed"
+                        sysfsDirs > 0 && sysfsKv == 0 ->
+                            "sysfs 节点被 SELinux 限制（$sysfsDirs 个目录 0 条可读，完整内核节点需 Root），已通过系统服务/属性补充采集 $serviceLines 行数据：\n\n$trimmed"
                         else -> trimmed
                     }
-                    AppLog.i("深度扫描完成（$dirCount 个目录，$kvCount 条键值，${trimmed.length} 字节）")
+                    AppLog.i("深度扫描完成（sysfs $sysfsDirs 目录/$sysfsKv 键值，服务数据 $serviceLines 行，${trimmed.length} 字节）")
                 }
             } finally {
                 _deepScanning.value = false
