@@ -46,8 +46,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -201,6 +204,7 @@ private fun App() {
                     backProgress = 0f
                 }
             }
+            val backdropLayer = rememberGraphicsLayer()
             Box(Modifier.fillMaxSize()) {
                 val archivedToast = tr("已存档当前协议状态", "Current protocol archived")
                 val noDataToast = tr("暂无采样数据，无法存档", "No sample yet")
@@ -220,6 +224,16 @@ private fun App() {
                     tab = i
                 }
                 Scaffold(
+                    modifier = Modifier.drawWithContent {
+                        if (prefs.liquidGlassBar && Build.VERSION.SDK_INT >= 31) {
+                            backdropLayer.record {
+                                this@drawWithContent.drawContent()
+                            }
+                            drawLayer(backdropLayer)
+                        } else {
+                            drawContent()
+                        }
+                    },
                     bottomBar = {
                         if (!prefs.liquidGlassBar) {
                             if (prefs.isMiuix) {
@@ -277,6 +291,7 @@ private fun App() {
                         LiquidGlassBottomBar(
                             tabs = TABS,
                             selectedIndex = tab,
+                            backdropLayer = backdropLayer,
                             dark = dark,
                             onSelect = onTabClick,
                         )

@@ -11,6 +11,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -43,14 +44,27 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -330,66 +344,95 @@ internal fun MiuixBottomBar(
     }
 }
 
-/** Optional floating Liquid Glass capsule bottom bar with specular rim highlight & fluid spring indicator. */
+/**
+ * FlClash / iOS-style floating Liquid Glass capsule bottom bar.
+ * On Android 12+ (API 31+), samples the live backdrop GraphicsLayer and applies GPU RenderEffect blur
+ * with specular rim refraction, luminous top sheen, and interactive tap/drag fluid lens indicator.
+ */
 @Composable
 internal fun LiquidGlassBottomBar(
     tabs: List<TabItem>,
     selectedIndex: Int,
+    backdropLayer: GraphicsLayer? = null,
     dark: Boolean = isSystemInDarkTheme(),
     onSelect: (Int) -> Unit,
 ) {
-    val glassShape = RoundedCornerShape(30.dp)
-    val glassFill = if (dark) {
+    val canRealBlur = Build.VERSION.SDK_INT >= 31 && backdropLayer != null
+    val glassShape = RoundedCornerShape(31.dp)
+    var barRootOffset by remember { mutableStateOf(Offset.Unspecified) }
+    val currentSelected by rememberUpdatedState(selectedIndex)
+    val currentOnSelect by rememberUpdatedState(onSelect)
+
+    // With real GPU backdrop blur, keep tint ultra-translucent so blurred content shines through.
+    val glassTint = if (dark) {
         Brush.verticalGradient(
             listOf(
-                Color(0xFF2A2B32).copy(alpha = 0.78f),
-                Color(0xFF17181E).copy(alpha = 0.86f),
+                Color(0xFF282A34).copy(alpha = if (canRealBlur) 0.44f else 0.84f),
+                Color(0xFF14151C).copy(alpha = if (canRealBlur) 0.54f else 0.90f),
             ),
         )
     } else {
         Brush.verticalGradient(
             listOf(
-                Color.White.copy(alpha = 0.84f),
-                Color(0xFFF0F4FA).copy(alpha = 0.76f),
+                Color.White.copy(alpha = if (canRealBlur) 0.46f else 0.88f),
+                Color(0xFFEEF3FB).copy(alpha = if (canRealBlur) 0.36f else 0.82f),
             ),
         )
     }
+    // Luminous specular glass sheen along the top curve
+    val topSheen = Brush.verticalGradient(
+        0f to Color.White.copy(alpha = if (dark) 0.18f else 0.55f),
+        0.42f to Color.Transparent,
+        1f to Color.Black.copy(alpha = if (dark) 0.14f else 0.03f),
+    )
+    // Specular rim refraction border
     val rimBorder = if (dark) {
         Brush.verticalGradient(
             listOf(
-                Color.White.copy(alpha = 0.34f),
-                Color.White.copy(alpha = 0.08f),
-                Color.White.copy(alpha = 0.16f),
+                Color.White.copy(alpha = 0.46f),
+                Color.White.copy(alpha = 0.10f),
+                Color.White.copy(alpha = 0.22f),
             ),
         )
     } else {
         Brush.verticalGradient(
             listOf(
-                Color.White.copy(alpha = 0.95f),
-                Color(0xFFD6DCE8).copy(alpha = 0.55f),
-                Color.White.copy(alpha = 0.75f),
+                Color.White.copy(alpha = 0.96f),
+                Color(0xFFC8D2E3).copy(alpha = 0.50f),
+                Color.White.copy(alpha = 0.82f),
             ),
         )
     }
-    val indicatorFill = if (dark) {
+    // Inner liquid lens pill highlight
+    val lensFill = if (dark) {
         Brush.verticalGradient(
             listOf(
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.34f),
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                Color.White.copy(alpha = 0.22f),
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.26f),
             ),
         )
     } else {
         Brush.verticalGradient(
             listOf(
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                Color.White.copy(alpha = 0.88f),
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
             ),
         )
     }
-    val indicatorRim = if (dark) {
-        Color.White.copy(alpha = 0.24f)
+    val lensRim = if (dark) {
+        Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.42f),
+                Color.White.copy(alpha = 0.10f),
+            ),
+        )
     } else {
-        Color.White.copy(alpha = 0.85f)
+        Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.98f),
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+            ),
+        )
     }
 
     Box(
@@ -403,84 +446,128 @@ internal fun LiquidGlassBottomBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(62.dp)
+                .onGloballyPositioned { coords ->
+                    barRootOffset = coords.positionInRoot()
+                }
                 .shadow(
-                    elevation = if (dark) 16.dp else 12.dp,
+                    elevation = if (dark) 18.dp else 14.dp,
                     shape = glassShape,
-                    ambientColor = Color.Black.copy(alpha = if (dark) 0.55f else 0.18f),
-                    spotColor = Color.Black.copy(alpha = if (dark) 0.6f else 0.22f),
+                    ambientColor = Color.Black.copy(alpha = if (dark) 0.55f else 0.16f),
+                    spotColor = Color.Black.copy(alpha = if (dark) 0.65f else 0.20f),
                 )
                 .clip(glassShape)
-                .background(glassFill)
-                .border(width = 1.dp, brush = rimBorder, shape = glassShape)
-                .padding(5.dp),
+                .pointerInput(tabs.size) {
+                    detectHorizontalDragGestures { change, _ ->
+                        val w = size.width.toFloat()
+                        if (w > 0f && tabs.isNotEmpty()) {
+                            val idx = ((change.position.x / w) * tabs.size).toInt().coerceIn(0, tabs.lastIndex)
+                            if (idx != currentSelected) currentOnSelect(idx)
+                        }
+                    }
+                },
         ) {
-            val tabWidth = maxWidth / tabs.size.coerceAtLeast(1)
-            val pillOffset by animateDpAsState(
-                targetValue = tabWidth * selectedIndex,
-                animationSpec = spring(dampingRatio = 0.68f, stiffness = Spring.StiffnessMediumLow),
-                label = "liquidGlassPill",
-            )
-            // Fluid glass selection capsule
+            // 1) Real-time GPU frosted backdrop blur (Android 12+)
+            if (canRealBlur && backdropLayer != null && barRootOffset != Offset.Unspecified) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .blur(radius = 24.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                        .drawBehind {
+                            if (backdropLayer.size.width > 0 && backdropLayer.size.height > 0) {
+                                translate(left = -barRootOffset.x, top = -barRootOffset.y) {
+                                    drawLayer(backdropLayer)
+                                }
+                            }
+                        },
+                )
+            }
+            // 2) Frosted tint + top specular sheen + refraction rim
             Box(
                 modifier = Modifier
-                    .offset(x = pillOffset)
-                    .width(tabWidth)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(25.dp))
-                    .background(indicatorFill)
-                    .border(0.75.dp, indicatorRim, RoundedCornerShape(25.dp)),
+                    .matchParentSize()
+                    .background(glassTint)
+                    .background(topSheen)
+                    .border(width = 1.1.dp, brush = rimBorder, shape = glassShape),
             )
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                verticalAlignment = Alignment.CenterVertically,
+            // 3) Interactive fluid lens pill & tab items
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(5.dp),
             ) {
-                tabs.forEachIndexed { i, t ->
-                    val selected = selectedIndex == i
-                    val label = tr(t.zh, t.en)
-                    val tint by animateColorAsState(
-                        targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        animationSpec = tween(180),
-                        label = "glassTabTint",
-                    )
-                    val scale by animateFloatAsState(
-                        targetValue = if (selected) 1.10f else 0.95f,
-                        animationSpec = spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMedium),
-                        label = "glassTabScale",
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(25.dp))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = { onSelect(i) },
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                val tabWidth = maxWidth / tabs.size.coerceAtLeast(1)
+                val pillOffset by animateDpAsState(
+                    targetValue = tabWidth * selectedIndex,
+                    animationSpec = spring(dampingRatio = 0.64f, stiffness = Spring.StiffnessMediumLow),
+                    label = "liquidGlassPill",
+                )
+                Box(
+                    modifier = Modifier
+                        .offset(x = pillOffset)
+                        .width(tabWidth)
+                        .fillMaxHeight()
+                        .shadow(
+                            elevation = if (dark) 4.dp else 3.dp,
+                            shape = RoundedCornerShape(26.dp),
+                            ambientColor = Color.Black.copy(alpha = 0.12f),
+                            spotColor = Color.Black.copy(alpha = 0.16f),
+                        )
+                        .clip(RoundedCornerShape(26.dp))
+                        .background(lensFill)
+                        .border(0.85.dp, lensRim, RoundedCornerShape(26.dp)),
+                )
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    tabs.forEachIndexed { i, t ->
+                        val selected = selectedIndex == i
+                        val label = tr(t.zh, t.en)
+                        val tint by animateColorAsState(
+                            targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
+                            animationSpec = tween(160),
+                            label = "glassTabTint",
+                        )
+                        val scale by animateFloatAsState(
+                            targetValue = if (selected) 1.10f else 0.94f,
+                            animationSpec = spring(dampingRatio = 0.60f, stiffness = Spring.StiffnessMedium),
+                            label = "glassTabScale",
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(26.dp))
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = { onSelect(i) },
+                                ),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Icon(
-                                painter = painterResource(t.icon),
-                                contentDescription = label,
-                                tint = tint,
-                                modifier = Modifier
-                                    .size(21.dp)
-                                    .graphicsLayer {
-                                        scaleX = scale
-                                        scaleY = scale
-                                    },
-                            )
-                            Text(
-                                text = label,
-                                color = tint,
-                                fontSize = 10.5.sp,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                maxLines = 1,
-                            )
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Icon(
+                                    painter = painterResource(t.icon),
+                                    contentDescription = label,
+                                    tint = tint,
+                                    modifier = Modifier
+                                        .size(21.dp)
+                                        .graphicsLayer {
+                                            scaleX = scale
+                                            scaleY = scale
+                                        },
+                                )
+                                Text(
+                                    text = label,
+                                    color = tint,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                    maxLines = 1,
+                                )
+                            }
                         }
                     }
                 }
