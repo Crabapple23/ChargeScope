@@ -217,7 +217,8 @@ object Report {
         line("## 最新样本")
         if (s == null) line("无") else {
             line("电量 ${s.levelPct ?: "—"}%  状态码 ${s.status ?: "—"}  连接 ${s.plugged}  健康码 ${s.health ?: "—"}")
-            line("电压 ${s.voltageMv ?: "—"} mV  温度 ${s.tempDeci ?: "—"} (0.1°C)  电流 ${s.currentUa ?: "—"} µA  平均电流 ${s.currentAvgUa ?: "—"} µA")
+            val curMa = Analyzer.currentMa(s)?.let { "（换算 %.0f mA）".format(it) } ?: ""
+            line("电压 ${s.voltageMv ?: "—"} mV  温度 ${s.tempDeci ?: "—"} (0.1°C)  电流原始值 ${s.currentUa ?: "—"}$curMa  平均电流 ${s.currentAvgUa ?: "—"}")
             Analyzer.powerMw(s)?.let { line("电池侧估算功率 %.0f mW".format(it)) }
             for (n in s.rootNodes) line("[${n.name}] " + n.props.entries.joinToString(" ") { "${it.key}=${it.value}" })
         }

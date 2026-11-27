@@ -329,8 +329,22 @@ object Sampler {
         bgScope.launch {
             try {
                 val (text, err) = if (mode == 1) RootScanner.deepProbe(10) else ShizukuBridge.deepProbe(app)
-                _deepScan.value = if (err != null) "扫描失败：$err" else (text?.trim().orEmpty().ifEmpty { "未发现可读节点" })
-                AppLog.i(if (err != null) "深度扫描失败：$err" else "深度扫描完成（${text?.length ?: 0} 字节）")
+                if (err != null) {
+                    _deepScan.value = "扫描失败：$err"
+                    AppLog.i("深度扫描失败：$err")
+                } else {
+                    val trimmed = text?.trim().orEmpty()
+                    val allLines = trimmed.lines()
+                    val dirCount = allLines.count { it.startsWith("=== ") }
+                    val kvCount = allLines.count { l -> !l.startsWith("#") && !l.startsWith("=== ") && l.contains('=') }
+                    _deepScan.value = when {
+                        trimmed.isEmpty() -> "未发现可读节点"
+                        dirCount > 0 && kvCount == 0 ->
+                            "检测到 $dirCount 个充电节点目录，但未能读取到任何键值（常见原因：Android 14+ SELinux 限制 Shizuku uid=2000 读取 sysfs，需 Root 权限）。\n\n$trimmed"
+                        else -> trimmed
+                    }
+                    AppLog.i("深度扫描完成（$dirCount 个目录，$kvCount 条键值，${trimmed.length} 字节）")
+                }
             } finally {
                 _deepScanning.value = false
             }

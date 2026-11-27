@@ -565,37 +565,65 @@ object Analyzer {
         }
         val batAvgW = if (pbN > 0) pbSum / pbN / 1000.0 else null
         val advVv = advV?.let { it / 1e6 }
+        val advAa = advI?.let { it / 1e6 }
         var progAdv = false
         var derivedVmin = 0.0
         if (advVv != null && advVv > 5.5) {
-            if (FIXED_VOLTS.any { abs(advVv - it) <= 0.35 }) {
+            val highCurrentVendor = advAa != null && advAa > 5.05
+            val onFixedVolt = FIXED_VOLTS.any { abs(advVv - it) <= 0.15 }
+            if (onFixedVolt && !highCurrentVendor) {
                 evidence += Evidence(3, "充电器宣告上限 %.0f V 正好落在固定档位，至少支持固定档快充".format(advVv))
                 candidates += "USB PD 固定档 / QC 2.0 / AFC"
             } else {
                 progAdv = true
-                evidence += Evidence(
-                    3,
-                    "充电器宣告上限 %.1f V 不在 9/12/15/20/28V 固定档上，说明提供可编程调压范围（PPS / UFCS / 厂商私有）".format(advVv),
-                )
-                candidates += "PPS / UFCS / QC 3.0 / 厂商私有"
+                if (highCurrentVendor) {
+                    evidence += Evidence(
+                        3,
+                        "充电器宣告上限 %.1f V / %.2f A（电流超过标准 5 A 上限），属于厂商私有高电流 / 魔改 PPS 协议".format(advVv, advAa),
+                    )
+                    val extName = brand?.let { BRAND_SHORT[it] }
+                    if (extName != null) {
+                        candidates += "★$extName（宣告电流 %.1f A 超出标准 5A 上限）".format(advAa)
+                    }
+                    candidates += "厂商私有高电流 / 魔改 PPS"
+                } else {
+                    evidence += Evidence(
+                        3,
+                        "充电器宣告上限 %.1f V 不在 9/12/15/20/28V 固定档上，说明提供可编程调压范围（PPS / UFCS / 厂商私有）".format(advVv),
+                    )
+                    candidates += "PPS / UFCS / QC 3.0 / 厂商私有"
+                }
                 if (advVv > 21.0) {
                     evidence += Evidence(3, "宣告 %.1f V 高于标准 USB PD PPS 的 21 V 上限，更像厂商扩展协议".format(advVv))
                 }
             }
+        } else if (advAa != null && advAa > 5.05) {
+            progAdv = true
+            evidence += Evidence(
+                3,
+                "充电器宣告电流上限 %.2f A 超过标准 5 A，疑似低压大电流私有快充（VOOC / SCP 等）".format(advAa),
+            )
+            val extName = brand?.let { BRAND_SHORT[it] }
+            if (extName != null) candidates += "★$extName（宣告电流 %.1f A 超出标准 5A 上限）".format(advAa)
+            candidates += "低压大电流私有快充（VOOC / SCP 等）"
         }
         if (last.isCharging && advI != null && batAvgW != null && batAvgW >= 5.0) {
             val advA = advI / 1e6
-            // Input current cannot exceed the advertised limit, and input power >= battery power,
-            // so Vin >= Pbat / Iadv (lossless lower bound).
-            derivedVmin = batAvgW / advA
-            evidence += Evidence(
-                3,
-                "按电池侧平均功率约 %.1f W 反推：输入电流不超过宣告上限 %.2f A，输入电压至少约 %.1f V（未计损耗的下限）".format(batAvgW, advA, derivedVmin) +
-                    if (derivedVmin > 5.5) "，说明已进入高压协商而不是 5V 基础充电" else "",
-            )
-            if (derivedVmin > 5.5 && candidates.isEmpty()) candidates += "高压快充协议（PD / PPS / UFCS / QC / 私有）"
-            if (advVv != null && batAvgW > advVv * advA * 1.05) {
-                limits += "电池侧功率已超过充电器宣告上限（%.0f W），宣告值可能不准确。".format(advVv * advA)
+            if (advA > 0.1) {
+                // Input current cannot exceed the advertised limit, and input power >= battery power,
+                // so Vin >= Pbat / Iadv (lossless lower bound). Only report when it proves >5V charging.
+                derivedVmin = batAvgW / advA
+                if (derivedVmin > 5.5) {
+                    evidence += Evidence(
+                        3,
+                        "按电池侧平均功率约 %.1f W 反推：输入电流不超过宣告上限 %.2f A，输入电压至少约 %.1f V（未计损耗的下限），说明已进入高压协商而不是 5V 基础充电"
+                            .format(batAvgW, advA, derivedVmin),
+                    )
+                    if (candidates.isEmpty()) candidates += "高压快充协议（PD / PPS / UFCS / QC / 私有）"
+                }
+                if (advVv != null && batAvgW > advVv * advA * 1.05) {
+                    limits += "电池侧功率已超过充电器宣告上限（%.0f W），宣告值可能不准确。".format(advVv * advA)
+                }
             }
         }
         val ext = brand?.let { BRAND_SHORT[it] }
@@ -625,8 +653,11 @@ object Analyzer {
         if (brand != null) {
             evidence += Evidence(1, "本机品牌 $brand，常见私有协议：${BRAND_PROTOCOLS[brand]}（仅缩小范围）")
         }
+        val dumpsysOnly = last.rootNodes.isNotEmpty() && last.rootNodes.all { it.name == "dumpsys" }
         if (last.rootNodes.isEmpty()) {
             limits += "未启用 Root / Shizuku 或无法读取 sysfs：只有电池侧数据，无法识别协议。"
+        } else if (dumpsysOnly) {
+            limits += "当前仅获取到 dumpsys battery（未读到 /sys/class/power_supply 内核节点），通常是 Android 14+ SELinux 限制了 Shizuku (uid=2000) 读取 sysfs 文件；如需 L4 驱动协议确认与实时输入功率，需 Root 权限。"
         }
         if (volCount >= 2) limits += "电压步进判断受采样间隔和驱动上报精度影响，仅作参考。"
         if (basicDropped) {
@@ -661,7 +692,11 @@ object Analyzer {
 
         // Concise multi-line summary: 1) driver, 2) prediction + reason, 3) power/ceiling.
         val lines = ArrayList<String>(3)
-        lines += if (driver != null) "驱动：已报告 $driver" else "驱动：未报告协议名称（无特权或机型未暴露）"
+        lines += when {
+            driver != null -> "驱动：已报告 $driver"
+            dumpsysOnly -> "驱动：仅读到 dumpsys（SELinux 限制 Shizuku 读取 sysfs，需 Root 获取驱动协议名）"
+            else -> "驱动：未报告协议名称（无特权或机型未暴露）"
+        }
         if (predicted != null) {
             val reasons = ArrayList<String>(2)
             if (bestV > 5.5) reasons += "输入 %.1f V".format(bestV) + (if (bestI > 0) " / %.2f A".format(bestI) else "")

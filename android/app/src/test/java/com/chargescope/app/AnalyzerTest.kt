@@ -141,6 +141,25 @@ class AnalyzerTest {
         assertTrue(a.candidates.none { "三星 AFC" in it || "QC 2.0/3.0" in it })
     }
 
+    @Test fun xiaomiTurbo3Shizuku9v3_6a1IsVendorHighCurrentNotFixedStep() {
+        val dump = RootNode("dumpsys", mapOf("max_charging_voltage" to "9300000", "max_charging_current" to "6100000"))
+        val a = Analyzer.analyze(listOf(snap(listOf(dump), ua = -2_928_000L, mv = 4385)), "Xiaomi")
+        assertEquals(Status.POSSIBLE, a.status)
+        assertTrue(a.candidates.any { "HyperCharge" in it || "魔改 PPS" in it })
+        assertTrue(a.candidates.none { "QC 2.0" in it || "AFC" in it })
+        assertTrue(a.evidence.none { "反推" in it.text })
+        assertTrue(a.limitations.any { "SELinux" in it })
+    }
+
+    @Test fun honorShizukuDumpsysOnlyExplainsSelinuxAndSkipsSub5vBound() {
+        val dump = RootNode("dumpsys", mapOf("max_charging_voltage" to "5000000", "max_charging_current" to "3000000"))
+        val a = Analyzer.analyze(listOf(snap(listOf(dump), ua = 1645L, mv = 4039)), "HONOR")
+        assertEquals(Status.UNKNOWN, a.status)
+        assertTrue(a.evidence.none { "反推" in it.text })
+        assertTrue(a.description.contains("SELinux"))
+        assertTrue(a.limitations.any { "SELinux" in it })
+    }
+
     @Test fun parseRootOutput() {
         val nodes = RootScanner.parse("@@usb\ntype=USB\nonline=1\n@@battery\ncapacity=50\n")
         assertEquals(2, nodes.size)
