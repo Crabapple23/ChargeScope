@@ -206,7 +206,10 @@ object Recorder {
     @Synchronized
     fun exportTo(ctx: Context, out: OutputStream): Boolean {
         flush()
-        val app = ctx.applicationContext
+        return mergeCsvFiles(collectSourceFiles(ctx.applicationContext), out)
+    }
+
+    private fun collectSourceFiles(app: Context): List<File> {
         val sources = ArrayList<File>()
         for (name in LEGACY_NAMES) {
             val f = File(app.filesDir, name)
@@ -216,7 +219,12 @@ object Recorder {
             ?.filter { it.isFile && it.length() > 0L }
             ?.sortedBy { it.name }
             ?.let { sources.addAll(it) }
-        if (sources.isEmpty()) return false
+        return sources
+    }
+
+    internal fun mergeCsvFiles(sources: List<File>, out: OutputStream): Boolean {
+        val existing = sources.filter { it.exists() && it.length() > 0L }
+        if (existing.isEmpty()) return false
 
         val w = BufferedWriter(OutputStreamWriter(out, Charsets.UTF_8), 8192)
         w.write(HEADER)
@@ -237,7 +245,7 @@ object Recorder {
             }
         }
 
-        for (f in sources) {
+        for (f in existing) {
             try {
                 if (f.name.endsWith(".gz")) {
                     BufferedReader(InputStreamReader(GZIPInputStream(FileInputStream(f)), Charsets.UTF_8)).use(::copyLines)
@@ -252,17 +260,12 @@ object Recorder {
         return true
     }
 
-    private fun recountRows(app: Context): Long {
+    private fun recountRows(app: Context): Long = countCsvRows(collectSourceFiles(app))
+
+    internal fun countCsvRows(sources: List<File>): Long {
         var total = 0L
-        val sources = ArrayList<File>()
-        for (name in LEGACY_NAMES) {
-            val f = File(app.filesDir, name)
-            if (f.exists() && f.length() > 0L) sources += f
-        }
-        sessionsDir(app).listFiles()
-            ?.filter { it.isFile && it.length() > 0L }
-            ?.let { sources.addAll(it) }
         for (f in sources) {
+            if (!f.exists() || f.length() <= 0L) continue
             try {
                 val reader = if (f.name.endsWith(".gz")) {
                     BufferedReader(InputStreamReader(GZIPInputStream(FileInputStream(f)), Charsets.UTF_8))
