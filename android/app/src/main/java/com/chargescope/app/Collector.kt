@@ -16,9 +16,32 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import kotlin.math.roundToInt
 
 object Collector {
     private val BATTERY_FILTER = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+    @Volatile private var cachedDesignMah: Int? = null
+    @Volatile private var designProbed = false
+
+    /** Factory design battery capacity (mAh) from Android PowerProfile, cached once per process. */
+    fun designCapacityMah(ctx: Context): Int? {
+        if (designProbed) return cachedDesignMah
+        designProbed = true
+        val v = try {
+            val cls = Class.forName("com.android.internal.os.PowerProfile")
+            val pp = cls.getConstructor(Context::class.java).newInstance(ctx.applicationContext)
+            val cap = try {
+                cls.getMethod("getBatteryCapacity").invoke(pp) as? Double
+            } catch (_: Throwable) {
+                cls.getMethod("getAveragePower", String::class.java).invoke(pp, "battery.capacity") as? Double
+            }
+            cap?.roundToInt()?.takeIf { it in 500..25_000 }
+        } catch (_: Throwable) {
+            null
+        }
+        cachedDesignMah = v
+        return v
+    }
 
     /** Unprivileged battery data from public Android APIs. Cheap: sticky broadcast + a few binder calls. */
     fun battery(ctx: Context): Snapshot {
@@ -63,6 +86,7 @@ object Collector {
             currentAvgUa = prop(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE, false),
             chargeCounterUah = prop(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER, true),
             chargeTimeRemainingMs = chargeTimeMs,
+            designCapacityMah = designCapacityMah(ctx),
         )
     }
 }

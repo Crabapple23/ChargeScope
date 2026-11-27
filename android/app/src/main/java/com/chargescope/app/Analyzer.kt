@@ -148,21 +148,49 @@ object Analyzer {
         return v * i / 1000.0
     }
 
-    /** Battery health percentage: prefer fuel-gauge `soh` across battery/vendor nodes, else `charge_full / design`. */
+    private fun toMah(raw: Long?): Int? {
+        if (raw == null || raw <= 0L) return null
+        val mah = if (raw > 50_000L) (raw / 1000.0).roundToLong().toInt() else raw.toInt()
+        return mah.takeIf { it in 500..25_000 }
+    }
+
+    /** Factory design capacity (mAh): prefer sysfs/Health HAL `charge_full_design`, fallback to PowerProfile. */
+    fun designCapacityMah(s: Snapshot): Int? {
+        for (n in s.rootNodes) {
+            val t = n.props["type"]?.uppercase()
+            val isBat = t == "BATTERY" || n.name == "battery" || n.name == "bms" || n.name == "health" ||
+                n.name == "qcom-battery" || n.name == "xm_power" || n.name == "oplus_chg"
+            if (!isBat) continue
+            toMah(n.props["charge_full_design"]?.trim()?.toLongOrNull())?.let { return it }
+        }
+        return s.designCapacityMah?.takeIf { it in 500..25_000 }
+    }
+
+    /** Current usable full-charge capacity (mAh) from sysfs `charge_full` or Shizuku learned capacity. */
+    fun usableCapacityMah(s: Snapshot): Int? {
+        for (n in s.rootNodes) {
+            val t = n.props["type"]?.uppercase()
+            val isBat = t == "BATTERY" || n.name == "battery" || n.name == "bms" || n.name == "health" ||
+                n.name == "qcom-battery" || n.name == "xm_power" || n.name == "oplus_chg"
+            if (!isBat) continue
+            toMah(n.props["charge_full"]?.trim()?.toLongOrNull())?.let { return it }
+        }
+        return null
+    }
+
+    /** Battery health percentage: prefer fuel-gauge `soh` across battery/vendor/health nodes, else `usable / design`. */
     fun batteryHealthPct(s: Snapshot): Int? {
-        var full: Long? = null
-        var design: Long? = null
         for (n in s.rootNodes) {
             val t = n.props["type"]?.uppercase()
             val isBat = t == "BATTERY" || n.name == "battery" || n.name == "bms" || n.name == "health" ||
                 n.name == "qcom-battery" || n.name == "xm_power" || n.name == "oplus_chg"
             if (!isBat) continue
             n.props["soh"]?.trim()?.toIntOrNull()?.takeIf { it in 1..100 }?.let { return it }
-            if (full == null) full = n.props["charge_full"]?.trim()?.toLongOrNull()?.takeIf { it > 0 }
-            if (design == null) design = n.props["charge_full_design"]?.trim()?.toLongOrNull()?.takeIf { it > 0 }
         }
-        if (full != null && design != null) {
-            val pct = (full * 100.0 / design).roundToLong().toInt()
+        val usable = usableCapacityMah(s)
+        val design = designCapacityMah(s)
+        if (usable != null && design != null) {
+            val pct = (usable * 100.0 / design).roundToLong().toInt()
             if (pct in 10..120) return pct.coerceAtMost(100)
         }
         return null

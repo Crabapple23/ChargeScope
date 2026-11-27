@@ -414,13 +414,17 @@ private fun RealtimeTab() {
         KV(tr("温度", "Temperature"), fmt(s?.tempDeci?.let { it / 10.0 }, "°C", 1))
         val hText = healthText(s?.health, isEn)
         val hPct = s?.let { Analyzer.batteryHealthPct(it) }
+        val designMah = s?.let { Analyzer.designCapacityMah(it) }
+        val usableMah = s?.let { Analyzer.usableCapacityMah(it) }
         val cycles = s?.let { Analyzer.batteryCycleCount(it) }
         val healthDisplay = buildList {
             if (hText != null) add(hText)
-            if (hPct != null) add("$hPct%")
             if (cycles != null) add(tr("${cycles}次循环", "$cycles cycles"))
         }.joinToString(" · ").ifEmpty { null }
         KV(tr("健康", "Health"), healthDisplay)
+        KV(tr("估算健康", "Est. Health"), hPct?.let { "$it %" })
+        KV(tr("电池设计容量", "Design Capacity"), designMah?.let { "$it mAh" })
+        KV(tr("电池可用上限容量", "Usable Capacity"), usableMah?.let { "$it mAh" })
         val etaText = Analyzer.estimateChargeTimeRemainingMs(s, ui.metrics)?.let { (ms, fromSys) ->
             val dur = fmtDuration(ms, isEn)
             if (fromSys) dur else dur + tr("（速率估算）", " (est.)")

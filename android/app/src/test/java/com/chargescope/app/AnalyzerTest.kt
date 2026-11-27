@@ -160,6 +160,14 @@ class AnalyzerTest {
         assertTrue(a.limitations.any { "SELinux" in it })
     }
 
+    @Test fun shizukuLearnedCapacityPlusPowerProfileGivesHealth() {
+        val health = RootNode("health", mapOf("charge_full" to "4307000"))
+        val s = snap(listOf(health)).copy(designCapacityMah = 5000)
+        assertEquals(5000, Analyzer.designCapacityMah(s))
+        assertEquals(4307, Analyzer.usableCapacityMah(s))
+        assertEquals(86, Analyzer.batteryHealthPct(s))
+    }
+
     @Test fun parseRootOutput() {
         val nodes = RootScanner.parse("@@usb\ntype=USB\nonline=1\n@@battery\ncapacity=50\n")
         assertEquals(2, nodes.size)

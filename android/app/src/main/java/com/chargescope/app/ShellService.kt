@@ -117,20 +117,17 @@ class ShellService : IShellService.Stub() {
             ?.takeIf { it > 0 }
             ?.let { map["charge_full_design"] = it.toString() }
 
-        // Fallback: extract Android's learned vs nominal battery capacity from batterystats.
-        if (!map.containsKey("soh") && (!map.containsKey("charge_full") || !map.containsKey("charge_full_design"))) {
+        // Fallback: extract Android's learned usable battery capacity from batterystats
+        // (design capacity comes from PowerProfile or IHealth, avoiding learned/learned = 100%).
+        if (!map.containsKey("charge_full")) {
             val stats = runCmd("dumpsys", "batterystats", "--charged", timeoutSec = 3, maxChars = 16_384)
             if (stats.isNotEmpty()) {
-                val cap = Regex("""(?i)Capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
                 val learnedMax = Regex("""(?i)Max learned battery capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                val learnedLast = Regex("""(?i)Last learned battery capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
                 val learnedMin = Regex("""(?i)Min learned battery capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
-                val estCap = Regex("""(?i)Estimated battery capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
-                val learned = learnedMax ?: estCap ?: learnedMin
-                if (cap != null && cap in 500..20_000) {
-                    map.putIfAbsent("charge_full_design", (cap * 1000L).toString())
-                }
-                if (learned != null && learned in 500..20_000) {
-                    map.putIfAbsent("charge_full", (learned * 1000L).toString())
+                val learned = learnedMax ?: learnedLast ?: learnedMin
+                if (learned != null && learned in 500..25_000) {
+                    map["charge_full"] = (learned * 1000L).toString()
                 }
             }
         }
@@ -209,7 +206,7 @@ class ShellService : IShellService.Stub() {
         }
         val propsRaw = runCmd("getprop", timeoutSec = 3, maxChars = 65_536)
         if (propsRaw.isNotEmpty()) {
-            val propRegex = Regex("""(?i)(charg|batt|fastchg|vooc|superchg|ufcs|pps|quick_charge|pd\.|miui\.power|hw\.power|oplus\.chg|vivo\.chg)""")
+            val propRegex = Regex("""(?i)(charge|charger|charging|battery|fastchg|vooc|superchg|ufcs|quick_charge|usb\.pd|miui\.power|micharge|hw\.power|oplus\.chg|vivo\.chg)""")
             val propLines = propsRaw.lineSequence().filter { propRegex.containsMatchIn(it) }.take(80).joinToString("\n")
             if (propLines.isNotEmpty()) {
                 sb.append("=== getprop (charging) ===\n").append(propLines.take(4000)).append('\n')
