@@ -223,8 +223,9 @@ object RootScanner {
             val text = try {
                 future.get(timeoutSec, TimeUnit.SECONDS)
             } catch (_: TimeoutException) {
-                future.cancel(true)
+                // Destroy the su process first so its stdout closes and unblocks readLine() on readerExec.
                 destroySession()
+                future.cancel(true)
                 return null to "su 等待超时（请在 Root 管理器弹窗中授权后重试）"
             }
 

@@ -17,10 +17,12 @@ import rikka.shizuku.Shizuku
 object ShizukuBridge {
     private const val REQ = 1001
 
-    enum class State(val label: String) {
-        NOT_RUNNING("Shizuku 未运行（请先在 Shizuku 应用中启动）"),
-        NO_PERMISSION("Shizuku 已运行，尚未授权本应用"),
-        READY("Shizuku 已就绪"),
+    enum class State(val label: String, val labelEn: String) {
+        NOT_RUNNING("Shizuku 未运行（请先在 Shizuku 应用中启动）", "Shizuku not running (start it in the Shizuku app first)"),
+        NO_PERMISSION("Shizuku 已运行，尚未授权本应用", "Shizuku running, permission not granted"),
+        READY("Shizuku 已就绪", "Shizuku ready");
+
+        fun display(isEn: Boolean): String = if (isEn) labelEn else label
     }
 
     private val _state = MutableStateFlow(State.NOT_RUNNING)

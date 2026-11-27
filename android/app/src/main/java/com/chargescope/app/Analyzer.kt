@@ -134,18 +134,28 @@ object Analyzer {
         return v.toDouble() * abs(i.toDouble()) / 1e12
     }
 
-    /** Battery current in mA (absolute). Some devices report mA instead of uA. */
-    fun currentMa(s: Snapshot): Double? {
+    /**
+     * Battery current in mA (absolute).
+     * Most Android devices report uA, while a few (e.g. some Honor/Huawei models) report mA.
+     * Pass forceMicroAmps=true when the device is known to report in uA (e.g. saw >=25mA in uA or uAh counter),
+     * preventing low trickle currents like 15,000 uA (15 mA) from being misread as 15,000 mA.
+     */
+    fun currentMa(s: Snapshot, forceMicroAmps: Boolean = false): Double? {
         val raw = s.currentUa ?: return null
         val a = abs(raw.toDouble())
-        return if (s.isPlugged && a >= 1.0 && a < 20_000.0) a else a / 1000.0
+        if (a < 1.0) return 0.0
+        val uahCounter = (s.chargeCounterUah ?: 0L) >= 100_000L
+        return if (!forceMicroAmps && !uahCounter && a < 10_000.0) a else a / 1000.0
     }
 
-    /** Estimated battery-side power in mW (V x |I|). */
+    /** Detects whether a window of snapshots clearly uses micro-amp / micro-amp-hour units. */
+    fun usesMicroAmps(window: List<Snapshot>): Boolean =
+        window.any { abs(it.currentUa ?: 0L) >= 25_000L || (it.chargeCounterUah ?: 0L) >= 100_000L }
+
     /** Battery-side power estimate in mW. In dual-cell mode, doubles single-cell voltage readings (<=5.5V). */
-    fun powerMw(s: Snapshot, dualCell: Boolean = false): Double? {
+    fun powerMw(s: Snapshot, dualCell: Boolean = false, forceMicroAmps: Boolean = false): Double? {
         val v = s.voltageMv ?: return null
-        val i = currentMa(s) ?: return null
+        val i = currentMa(s, forceMicroAmps) ?: return null
         val effV = if (dualCell && v <= 5500) v * 2.0 else v.toDouble()
         return effV * i / 1000.0
     }
@@ -644,8 +654,9 @@ object Analyzer {
         // ---- Inference without live input readings (many devices expose none) -------------------
         // Smoothed battery-side power over the last <=10 samples.
         var pbSum = 0.0; var pbN = 0
+        val forceUa = usesMicroAmps(window)
         for (idx in (window.size - 10).coerceAtLeast(0) until window.size) {
-            powerMw(window[idx], dualCell)?.let { pbSum += it; pbN++ }
+            powerMw(window[idx], dualCell, forceUa)?.let { pbSum += it; pbN++ }
         }
         val batAvgW = if (pbN > 0) pbSum / pbN / 1000.0 else null
         val advVv = advV?.let { it / 1e6 }
@@ -730,7 +741,7 @@ object Analyzer {
         }
 
         // L2 / L1 references.
-        val batMw = powerMw(last, dualCell)
+        val batMw = powerMw(last, dualCell, forceUa)
         if (batMw != null && batMw >= 15_000.0) {
             evidence += Evidence(2, "电池侧估算功率约 %.1f W（仅参考，不能确认协议）".format(batMw / 1000.0))
         }
@@ -841,13 +852,14 @@ object Analyzer {
 
     fun metrics(list: List<Snapshot>, dualCell: Boolean = false): Metrics {
         if (list.isEmpty()) return Metrics(0, 0, null, null, null, null)
+        val forceUa = usesMicroAmps(list)
         var pSum = 0.0; var pN = 0; var peak: Double? = null
         var tSum = 0.0; var tN = 0
         var firstLvl: Snapshot? = null
         var lastLvl: Snapshot? = null
         for (i in list.indices) {
             val s = list[i]
-            powerMw(s, dualCell)?.let {
+            powerMw(s, dualCell, forceUa)?.let {
                 pSum += it; pN++
                 val pk = peak
                 if (pk == null || it > pk) peak = it

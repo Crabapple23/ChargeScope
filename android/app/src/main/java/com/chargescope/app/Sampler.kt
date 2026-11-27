@@ -137,6 +137,7 @@ object Recorder {
 
         // Trim oldest files when total recorded storage reaches the configured cap.
         val cap = Prefs.long(app, Prefs.FILE_MB, 8L) * 1024L * 1024L
+        var deletedAny = false
         if (diskBytes(app) >= cap) {
             val candidates = ArrayList<File>()
             for (name in LEGACY_NAMES) {
@@ -146,8 +147,13 @@ object Recorder {
             dir.listFiles()?.filter { it.isFile }?.sortedBy { it.name }?.let { candidates.addAll(it) }
             for (old in candidates) {
                 if (diskBytes(app) < cap) break
-                old.delete()
+                if (old.delete()) deletedAny = true
             }
+        }
+        if (deletedAny) {
+            rows = recountRows(app)
+            Prefs.setRecordedRows(app, rows)
+            Sampler.syncRecordedRows(rows)
         }
 
         val f = File(dir, "rec_${System.currentTimeMillis()}.csv.gz")
@@ -244,6 +250,38 @@ object Recorder {
         }
         w.flush()
         return true
+    }
+
+    private fun recountRows(app: Context): Long {
+        var total = 0L
+        val sources = ArrayList<File>()
+        for (name in LEGACY_NAMES) {
+            val f = File(app.filesDir, name)
+            if (f.exists() && f.length() > 0L) sources += f
+        }
+        sessionsDir(app).listFiles()
+            ?.filter { it.isFile && it.length() > 0L }
+            ?.let { sources.addAll(it) }
+        for (f in sources) {
+            try {
+                val reader = if (f.name.endsWith(".gz")) {
+                    BufferedReader(InputStreamReader(GZIPInputStream(FileInputStream(f)), Charsets.UTF_8))
+                } else {
+                    BufferedReader(InputStreamReader(FileInputStream(f), Charsets.UTF_8))
+                }
+                reader.use { r ->
+                    try {
+                        while (true) {
+                            val line = r.readLine() ?: break
+                            if (line.isNotBlank() && line != HEADER) total++
+                        }
+                    } catch (_: IOException) {
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return total
     }
 
     fun diskBytes(ctx: Context): Long {
@@ -396,7 +434,25 @@ object Sampler {
         AppSettings.setDualCell(app, enabled)
         Prefs.setDualCellPrompted(app, true)
         AppLog.i(if (enabled) "双电芯模式：已开启" else "双电芯模式：已关闭")
-        bgScope.launch { sample(app) }
+        bgScope.launch {
+            mutex.withLock {
+                rebuildSeriesLocked(enabled)
+            }
+            sample(app)
+        }
+    }
+
+    private fun rebuildSeriesLocked(dual: Boolean) {
+        seriesSize = 0
+        seriesHead = 0
+        val forceUa = Analyzer.usesMicroAmps(ring)
+        val start = (ring.size - SERIES).coerceAtLeast(0)
+        for (i in start until ring.size) {
+            val snap = ring[i]
+            val batF = Analyzer.powerMw(snap, dual, forceUa)?.div(1000.0)?.toFloat() ?: Float.NaN
+            val inF = Analyzer.inputPowerW(Analyzer.input(snap))?.toFloat() ?: Float.NaN
+            pushSeries(batF, inF, snap.elapsedMs)
+        }
     }
 
     /** Called immediately when the user switches privileged mode; runs on Sampler's own scope. */
@@ -634,8 +690,9 @@ object Sampler {
         }
 
         val dual = Prefs.dualCell(app)
+        val forceUa = Analyzer.usesMicroAmps(ring)
         val inp = Analyzer.input(s)
-        val powerMw = Analyzer.powerMw(s, dual)
+        val powerMw = Analyzer.powerMw(s, dual, forceUa)
         val batW = powerMw?.div(1000.0)
         val inW = Analyzer.inputPowerW(inp)
         val batF = batW?.toFloat() ?: Float.NaN

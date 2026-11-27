@@ -496,7 +496,7 @@ private fun PrivilegedStep(
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(tr("方式一：Shizuku 权限（免 Root 推荐）", "Option 1: Shizuku (No Root Needed)"), style = MaterialTheme.typography.titleMedium)
             Text(
-                tr("状态：${shzState.label}", "Status: ${shzState.label}"),
+                tr("状态：${shzState.display(false)}", "Status: ${shzState.display(true)}"),
                 style = MaterialTheme.typography.bodyMedium,
             )
             Row(

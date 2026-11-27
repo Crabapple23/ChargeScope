@@ -193,6 +193,17 @@ class AnalyzerTest {
         assertNull(Analyzer.detectDualCellReason(normal))
     }
 
+    @Test fun currentMaHandlesTrickleMicroAmpsAndUnpluggedMilliAmps() {
+        // Standard uA device (e.g. Xiaomi) at 15 mA trickle (-15,000 uA): must stay 15 mA, NOT 15,000 mA.
+        val trickleWithCounter = snap(ua = -15_000L).copy(chargeCounterUah = 3_200_000L)
+        assertEquals(15.0, Analyzer.currentMa(trickleWithCounter)!!, 0.01)
+        val trickleForced = snap(ua = -15_000L)
+        assertEquals(15.0, Analyzer.currentMa(trickleForced, forceMicroAmps = true)!!, 0.01)
+        // mA-reporting device (e.g. Honor) when unplugged at 500 mA: must stay 500 mA, NOT 0.5 mA.
+        val honorIdle = snap(plugged = 0, ua = 500L)
+        assertEquals(500.0, Analyzer.currentMa(honorIdle)!!, 0.01)
+    }
+
     @Test fun parseRootOutput() {
         val nodes = RootScanner.parse("@@usb\ntype=USB\nonline=1\n@@battery\ncapacity=50\n")
         assertEquals(2, nodes.size)

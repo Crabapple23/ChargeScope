@@ -2,9 +2,11 @@ package com.chargescope.app
 
 import android.Manifest
 import android.content.Context
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.DocumentsContract
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -103,6 +105,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.OutputStream
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlin.coroutines.cancellation.CancellationException
 
 class MainActivity : ComponentActivity() {
@@ -962,6 +968,34 @@ private fun Fold(title: String, summary: String, content: @Composable () -> Unit
     }
 }
 
+private val EXPORT_TS_FMT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+
+private fun exportTimestamp(): String =
+    Instant.ofEpochMilli(System.currentTimeMillis()).atZone(ZoneId.systemDefault()).format(EXPORT_TS_FMT)
+
+/** Writes directly into the user's pre-authorized SAF folder; returns null if tree is unavailable/revoked. */
+private fun exportToAuthorizedTree(
+    ctx: Context,
+    treeUriStr: String,
+    mime: String,
+    fileName: String,
+    writer: (OutputStream) -> Boolean,
+): Boolean? = try {
+    val treeUri = Uri.parse(treeUriStr)
+    val parentDocUri = DocumentsContract.buildDocumentUriUsingTree(
+        treeUri,
+        DocumentsContract.getTreeDocumentId(treeUri),
+    )
+    val docUri = DocumentsContract.createDocument(ctx.contentResolver, parentDocUri, mime, fileName)
+        ?: return null
+    ctx.contentResolver.openOutputStream(docUri)?.use(writer) ?: false
+} catch (_: SecurityException) {
+    Prefs.setExportTreeUri(ctx, null)
+    null
+} catch (_: Exception) {
+    null
+}
+
 @Composable
 private fun DataTab() {
     val ctx: Context = LocalContext.current
@@ -984,6 +1018,7 @@ private fun DataTab() {
     var msg by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     var diskBytes by remember { mutableLongStateOf(0L) }
+    var exportTree by remember { mutableStateOf(Prefs.exportTreeUri(ctx)) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -1119,7 +1154,7 @@ private fun DataTab() {
             ) { Text(if (checking) tr("正在检测…", "Probing…") else tr("检测 Root 授权", "Test Root Access")) }
         }
         if (mode == 2L) {
-            Text(tr("状态：", "Status: ") + shz.label)
+            Text(tr("状态：", "Status: ") + shz.display(isEn))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     enabled = !checking,
@@ -1144,8 +1179,68 @@ private fun DataTab() {
     }
     Fold(tr("记录与日志", "Records & Logs"), tr("$recordedRows 行 · ${fmtBytes(diskBytes)}", "$recordedRows rows · ${fmtBytes(diskBytes)}")) {
         Text(tr("已记录 $recordedRows 行，本机总占用约 ${fmtBytes(diskBytes)}（CSV 采用 GZIP 压缩存储，导出时自动解压）。应用无联网权限，导出不含设备标识。", "$recordedRows rows recorded, ~${fmtBytes(diskBytes)} on disk (GZIP compressed, auto-decompressed on export). Offline only."))
-        Button(onClick = { exportCsv.launch("chargescope.csv") }, modifier = Modifier.fillMaxWidth()) { Text(tr("导出 CSV 记录", "Export CSV")) }
-        Button(onClick = { exportLog.launch("chargescope-log.txt") }, modifier = Modifier.fillMaxWidth()) { Text(tr("导出诊断日志", "Export Diagnostic Log")) }
+        Button(
+            onClick = {
+                val tree = exportTree
+                if (tree != null) {
+                    scope.launch {
+                        val name = "chargescope-${exportTimestamp()}.csv"
+                        val direct = withContext(Dispatchers.IO) {
+                            exportToAuthorizedTree(ctx, tree, "text/csv", name) { out -> Recorder.exportTo(ctx, out) }
+                        }
+                        if (direct != null) {
+                            msg = if (direct) "$csvOkMsg ($name)" else csvFailMsg
+                        } else {
+                            exportTree = Prefs.exportTreeUri(ctx)
+                            exportCsv.launch("chargescope.csv")
+                        }
+                    }
+                } else {
+                    exportCsv.launch("chargescope.csv")
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(tr("导出 CSV 记录", "Export CSV")) }
+        Button(
+            onClick = {
+                val tree = exportTree
+                if (tree != null) {
+                    scope.launch {
+                        val name = "chargescope-log-${exportTimestamp()}.txt"
+                        val direct = withContext(Dispatchers.IO) {
+                            exportToAuthorizedTree(ctx, tree, "text/plain", name) { out ->
+                                val text = Report.build(ctx, Sampler.state.value)
+                                out.write(text.toByteArray(Charsets.UTF_8))
+                                true
+                            }
+                        }
+                        if (direct != null) {
+                            msg = if (direct) "$logOkMsg ($name)" else logFailMsg
+                        } else {
+                            exportTree = Prefs.exportTreeUri(ctx)
+                            exportLog.launch("chargescope-log.txt")
+                        }
+                    }
+                } else {
+                    exportLog.launch("chargescope-log.txt")
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(tr("导出诊断日志", "Export Diagnostic Log")) }
+        if (exportTree != null) {
+            Text(
+                tr("已启用快捷导出目录：点击导出将直接写入已授权目录。", "Quick export folder active: exports write directly to your authorized folder."),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = {
+                    Prefs.setExportTreeUri(ctx, null)
+                    exportTree = null
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(tr("清除已授权导出目录（改回每次选择）", "Clear Export Folder (Ask Every Time)")) }
+        }
         val clearedMsg = tr("已清除记录和日志", "Records and logs cleared")
         OutlinedButton(
             onClick = {

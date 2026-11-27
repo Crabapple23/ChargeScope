@@ -130,10 +130,12 @@ class SamplingService : Service() {
                 }
                 if (n++ % 5 == 0) {
                     val p = s?.let { Analyzer.powerMw(it, Prefs.dualCell(app)) }
-                    postNote(
-                        "记录中 · 电量 ${s?.levelPct ?: "—"}%" + (p?.let { "  ·  %.1f W".format(it / 1000.0) } ?: ""),
-                        showStopAction = true,
-                    )
+                    val text = if (isEn()) {
+                        "Recording · ${s?.levelPct ?: "—"}%" + (p?.let { "  ·  %.1f W".format(it / 1000.0) } ?: "")
+                    } else {
+                        "记录中 · 电量 ${s?.levelPct ?: "—"}%" + (p?.let { "  ·  %.1f W".format(it / 1000.0) } ?: "")
+                    }
+                    postNote(text, showStopAction = true)
                 }
                 delay(Prefs.intervalMs(app))
             }
@@ -155,7 +157,10 @@ class SamplingService : Service() {
         if (armed) idle() else if (!recordingActive()) stopSelf()
     }
 
-    private fun idle() = postNote("自动记录已开启 · 等待连接充电器")
+    private fun isEn() = Prefs.lang(this) == "en"
+    private fun t(zh: String, en: String) = if (isEn()) en else zh
+
+    private fun idle() = postNote(t("自动记录已开启 · 等待连接充电器", "Auto-record armed · Waiting for charger"))
 
     private fun violation(ctx: Context, s: Snapshot?, startedAt: Long): String? {
         if (s == null) return null
@@ -177,11 +182,11 @@ class SamplingService : Service() {
     private fun ensureForeground() {
         if (!channelReady) {
             getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(NotificationChannel(CHANNEL, "充电采样", NotificationManager.IMPORTANCE_LOW))
+                .createNotificationChannel(NotificationChannel(CHANNEL, t("充电采样", "Charge Sampling"), NotificationManager.IMPORTANCE_LOW))
             channelReady = true
         }
         ServiceCompat.startForeground(
-            this, ID, notification("充了个电 运行中"),
+            this, ID, notification(t("充了个电 运行中", "ChargeScope running")),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0,
         )
     }
@@ -197,13 +202,13 @@ class SamplingService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         if (!alertChannelReady) {
             nm.createNotificationChannel(
-                NotificationChannel(ALERT_CHANNEL, "安全阈值提醒", NotificationManager.IMPORTANCE_DEFAULT),
+                NotificationChannel(ALERT_CHANNEL, t("安全阈值提醒", "Safety Limit Alerts"), NotificationManager.IMPORTANCE_DEFAULT),
             )
             alertChannelReady = true
         }
         val n = Notification.Builder(this, ALERT_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("安全阈值已触发")
+            .setContentTitle(t("安全阈值已触发", "Safety Limit Reached"))
             .setContentText(reason)
             .setStyle(Notification.BigTextStyle().bigText(reason))
             .setContentIntent(contentIntent())
@@ -238,7 +243,7 @@ class SamplingService : Service() {
     private fun notification(text: String, showStopAction: Boolean = false): Notification {
         val builder = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
-            .setContentTitle("充了个电")
+            .setContentTitle(t("充了个电", "ChargeScope"))
             .setContentText(text)
             .setContentIntent(contentIntent())
             .setOngoing(true)
@@ -247,7 +252,7 @@ class SamplingService : Service() {
             builder.addAction(
                 Notification.Action.Builder(
                     Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
-                    "停止记录",
+                    t("停止记录", "Stop"),
                     stopActionIntent(),
                 ).build(),
             )
@@ -280,7 +285,11 @@ class SamplingService : Service() {
         fun send(ctx: Context, action: String?) {
             val i = Intent(ctx, SamplingService::class.java)
             if (action != null) i.action = action
-            ContextCompat.startForegroundService(ctx, i)
+            try {
+                ContextCompat.startForegroundService(ctx, i)
+            } catch (e: Exception) {
+                AppLog.i("启动前台服务受限：${e.javaClass.simpleName}: ${e.message}")
+            }
         }
     }
 }
