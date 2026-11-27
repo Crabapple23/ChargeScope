@@ -65,48 +65,52 @@ internal fun miuixColorScheme(dark: Boolean, dynamicColor: Boolean, oledBlack: B
     } else null
 
     val accent = dyn?.primary ?: if (dark) MiuixBlueDark else MiuixBlueLight
-    val accentContainer = dyn?.primaryContainer ?: accent.copy(alpha = if (dark) 0.22f else 0.14f)
-    val onAccentContainer = dyn?.onPrimaryContainer ?: accent
+    val onAccent = dyn?.onPrimary ?: Color.White
+    val accentContainer = dyn?.primaryContainer ?: accent.copy(alpha = if (dark) 0.24f else 0.14f)
+    val onAccentContainer = dyn?.onPrimaryContainer ?: if (dark) Color(0xFFD6E9FF) else Color(0xFF0D47A1)
+    val secContainer = dyn?.secondaryContainer ?: if (dark) Color(0xFF1F2D3D) else Color(0xFFE3EEFF)
+    val onSecContainer = dyn?.onSecondaryContainer ?: if (dark) Color(0xFFD6E9FF) else Color(0xFF0D47A1)
 
     return if (dark) {
         val bg = if (oledBlack) Color.Black else Color(0xFF0E0E10)
         val card = if (oledBlack) Color(0xFF141416) else Color(0xFF1C1C1E)
         darkColorScheme(
             primary = accent,
-            onPrimary = Color.White,
+            onPrimary = onAccent,
             primaryContainer = accentContainer,
             onPrimaryContainer = onAccentContainer,
-            secondary = Color(0xFF64D2FF),
-            onSecondary = Color.Black,
-            secondaryContainer = Color(0xFF1E2A38),
-            onSecondaryContainer = Color(0xFFD6E9FF),
+            secondary = dyn?.secondary ?: Color(0xFF64D2FF),
+            onSecondary = dyn?.onSecondary ?: Color.Black,
+            secondaryContainer = secContainer,
+            onSecondaryContainer = onSecContainer,
             tertiary = MiuixGreen,
             onTertiary = Color.Black,
             background = bg,
             onBackground = Color(0xFFF2F2F7),
             surface = bg,
             onSurface = Color(0xFFF2F2F7),
-            surfaceVariant = Color(0xFF242426),
-            onSurfaceVariant = Color(0xFF98989F),
+            surfaceVariant = Color(0xFF28282C),
+            onSurfaceVariant = Color(0xFFA0A0A8),
             surfaceContainerLowest = card,
             surfaceContainerLow = card,
             surfaceContainer = card,
-            surfaceContainerHigh = Color(0xFF262629),
-            surfaceContainerHighest = Color(0xFF2F2F33),
-            outline = Color(0xFF3A3A3C),
+            surfaceContainerHigh = Color(0xFF28282C),
+            surfaceContainerHighest = Color(0xFF343438),
+            outline = Color(0xFF9898A0),
             outlineVariant = Color(0xFF2C2C2E),
             error = MiuixRedDark,
+            onError = Color.White,
         )
     } else {
         lightColorScheme(
             primary = accent,
-            onPrimary = Color.White,
+            onPrimary = onAccent,
             primaryContainer = accentContainer,
             onPrimaryContainer = onAccentContainer,
-            secondary = Color(0xFF0A84FF),
-            onSecondary = Color.White,
-            secondaryContainer = Color(0xFFEAF2FF),
-            onSecondaryContainer = Color(0xFF0D47A1),
+            secondary = dyn?.secondary ?: Color(0xFF0A84FF),
+            onSecondary = dyn?.onSecondary ?: Color.White,
+            secondaryContainer = secContainer,
+            onSecondaryContainer = onSecContainer,
             tertiary = MiuixGreen,
             onTertiary = Color.White,
             background = Color(0xFFF7F7F7),
@@ -114,15 +118,16 @@ internal fun miuixColorScheme(dark: Boolean, dynamicColor: Boolean, oledBlack: B
             surface = Color(0xFFF7F7F7),
             onSurface = Color(0xFF111111),
             surfaceVariant = Color(0xFFEDEDEF),
-            onSurfaceVariant = Color(0xFF737378),
+            onSurfaceVariant = Color(0xFF6E6E73),
             surfaceContainerLowest = Color.White,
             surfaceContainerLow = Color.White,
             surfaceContainer = Color.White,
             surfaceContainerHigh = Color(0xFFF0F0F2),
-            surfaceContainerHighest = Color(0xFFE5E5EA),
-            outline = Color(0xFFD1D1D6),
-            outlineVariant = Color(0xFFE6E6EA),
+            surfaceContainerHighest = Color(0xFFE2E2E7),
+            outline = Color(0xFF8E8E93),
+            outlineVariant = Color(0xFFE4E4E8),
             error = MiuixRedLight,
+            onError = Color.White,
         )
     }
 }
