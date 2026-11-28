@@ -215,11 +215,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             SettingsCard(tr("界面风格", "UI Style")) {
-                OptionChips(
-                    options = listOf(
-                        tr("Material 3（默认）", "Material 3 (Default)") to 0,
-                        tr("MIUIX（HyperOS）", "MIUIX (HyperOS)") to 1,
-                    ),
+                UiStyleSelector(
                     selected = prefs.uiStyle,
                     onSelect = { AppSettings.setUiStyle(ctx, it) },
                 )

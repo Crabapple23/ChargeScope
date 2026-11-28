@@ -173,6 +173,92 @@ internal fun <T> OptionChips(options: List<Pair<String, T>>, selected: T, onSele
 }
 
 @Composable
+internal fun UiStyleSelector(selected: Int, onSelect: (Int) -> Unit) {
+    val miuix = LocalIsMiuix.current
+    val outerShape = RoundedCornerShape(if (miuix) 16.dp else 14.dp)
+    val innerShape = RoundedCornerShape(if (miuix) 12.dp else 10.dp)
+    val items = listOf(
+        Triple(0, "Material 3", tr("默认风格", "Default")),
+        Triple(1, "MIUIX", tr("HyperOS 风格", "HyperOS")),
+    )
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = outerShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            items.forEach { (id, title, sub) ->
+                val active = selected == id
+                val cardBg by animateColorAsState(
+                    targetValue = when {
+                        active && miuix -> MaterialTheme.colorScheme.surfaceContainerLowest
+                        active -> MaterialTheme.colorScheme.secondaryContainer
+                        else -> Color.Transparent
+                    },
+                    animationSpec = tween(180),
+                    label = "uiStyleBg",
+                )
+                val borderColor by animateColorAsState(
+                    targetValue = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else Color.Transparent,
+                    animationSpec = tween(180),
+                    label = "uiStyleBorder",
+                )
+                val titleColor by animateColorAsState(
+                    targetValue = when {
+                        active && miuix -> MaterialTheme.colorScheme.primary
+                        active -> MaterialTheme.colorScheme.onSecondaryContainer
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                    animationSpec = tween(180),
+                    label = "uiStyleTitle",
+                )
+                val subColor by animateColorAsState(
+                    targetValue = if (active) titleColor.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    animationSpec = tween(180),
+                    label = "uiStyleSub",
+                )
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(innerShape)
+                        .clickable { onSelect(id) },
+                    shape = innerShape,
+                    color = cardBg,
+                    border = BorderStroke(1.dp, borderColor),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 10.dp, horizontal = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                            color = titleColor,
+                            maxLines = 1,
+                        )
+                        Text(
+                            text = sub,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = subColor,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun Chips(options: List<Pair<String, Long>>, selected: Long, onSelect: (Long) -> Unit) {
     OptionChips(options, selected, onSelect)
 }

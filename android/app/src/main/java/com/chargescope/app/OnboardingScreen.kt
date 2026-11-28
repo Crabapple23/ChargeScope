@@ -431,11 +431,7 @@ private fun StepWelcomeAndStyle(
 
     StepCard {
         Text(tr("界面风格", "UI Style"), style = MaterialTheme.typography.titleMedium)
-        OptionChips(
-            options = listOf(
-                tr("Material 3（默认）", "Material 3 (Default)") to 0,
-                tr("MIUIX（HyperOS）", "MIUIX (HyperOS)") to 1,
-            ),
+        UiStyleSelector(
             selected = uiStyle,
             onSelect = onSelectUiStyle,
         )
