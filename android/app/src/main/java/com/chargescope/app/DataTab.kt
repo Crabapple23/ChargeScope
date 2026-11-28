@@ -252,24 +252,40 @@ internal fun DataTab() {
     }
     Fold(tr("双电芯设备模式", "Dual-Cell Battery Mode"), if (prefs.dualCell) tr("已开启", "On") else tr("已关闭", "Off")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(
-                tr("按 2S 串联双电芯算法计算功率与容量", "Use 2S dual-cell math for power & capacity"),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f).padding(end = 12.dp),
-            )
+            Column(Modifier.weight(1f).padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(tr("启用 2S 串联双电芯换算", "Use 2S Dual-Cell Math"), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    tr("按双电芯等效换算电池侧功率与电池容量", "Normalizes battery-side power and capacity for 2S packs"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             AppSwitch(
                 checked = prefs.dualCell,
                 onCheckedChange = { Sampler.onDualCellChanged(ctx, it) },
             )
         }
-        Text(
-            tr(
-                "适用于 OPPO / 一加 / realme / iQOO / 部分百瓦快充等串联双电芯机型。开启后自动按双电芯等效换算电池侧功率与容量；关闭时若自动检测到双电芯特征会弹窗询问。",
-                "For 2S series dual-cell phones. Normalizes battery-side power and capacity when enabled; prompts automatically if dual-cell signals are detected while off.",
-            ),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    tr("• 适用机型：OPPO / 一加 / realme / iQOO 及部分百瓦快充机型", "• Applies to: OPPO / OnePlus / realme / iQOO & 100W+ 2S phones"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    tr("• 自动识别：关闭时若检测到双电芯特征会自动弹窗询问，不确定可保持关闭", "• Auto-detect: prompts automatically if 2S signals appear while off"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
     Fold(
         tr("安全阈值", "Safety Limits"),
