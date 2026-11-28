@@ -116,6 +116,7 @@ internal fun ProtocolTab() {
     }
 
     val okToast = tr("报告图片已导出", "Report image exported")
+    val galleryOkToast = tr("已保存到相册 Pictures/ChargeScope", "Saved to Pictures/ChargeScope")
     val failToast = tr("报告图片导出失败", "Failed to export report image")
     val exportImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
         if (uri != null) {
@@ -136,22 +137,17 @@ internal fun ProtocolTab() {
 
     val onLongPressExport: () -> Unit = {
         val fileName = "chargescope-report-${exportTimestamp()}.png"
-        val tree = prefs.exportTreeUri
-        if (tree != null) {
-            scope.launch {
-                val direct = withContext(Dispatchers.IO) {
-                    exportToAuthorizedTree(ctx, tree, "image/png", fileName) { out ->
-                        ReportImage.exportPng(ctx, Sampler.state.value, prefs.dualCell, isDark, out)
-                    }
-                }
-                if (direct != null) {
-                    Toast.makeText(ctx, if (direct) "$okToast ($fileName)" else failToast, Toast.LENGTH_SHORT).show()
-                } else {
-                    exportImageLauncher.launch(fileName)
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                ReportImage.saveToGallery(ctx, fileName) { out ->
+                    ReportImage.exportPng(ctx, Sampler.state.value, prefs.dualCell, isDark, out)
                 }
             }
-        } else {
-            exportImageLauncher.launch(fileName)
+            if (saved) {
+                Toast.makeText(ctx, galleryOkToast, Toast.LENGTH_SHORT).show()
+            } else {
+                exportImageLauncher.launch(fileName)
+            }
         }
     }
 

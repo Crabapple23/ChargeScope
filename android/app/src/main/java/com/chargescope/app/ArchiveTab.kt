@@ -135,7 +135,6 @@ internal fun ArchiveTab() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val items by Archive.items.collectAsState()
-    val prefs by AppSettings.prefs.collectAsState()
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val reversed = remember(items) { items.asReversed() }
     var confirm by remember { mutableStateOf(false) }
@@ -148,6 +147,7 @@ internal fun ArchiveTab() {
     val noDataToast = tr("暂无采样数据，无法存档", "No sample yet")
     val deletedToast = tr("已删除该条存档", "Archive entry deleted")
     val okToast = tr("报告图片已导出", "Report image exported")
+    val galleryOkToast = tr("已保存到相册 Pictures/ChargeScope", "Saved to Pictures/ChargeScope")
     val failToast = tr("报告图片导出失败", "Failed to export report image")
 
     val exportImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
@@ -171,24 +171,18 @@ internal fun ArchiveTab() {
 
     val startExportImage: (ArchiveEntry) -> Unit = { entry ->
         val fileName = "chargescope-archive-${exportTimestamp()}.png"
-        val tree = prefs.exportTreeUri
-        if (tree != null) {
-            scope.launch {
-                val direct = withContext(Dispatchers.IO) {
-                    exportToAuthorizedTree(ctx, tree, "image/png", fileName) { out ->
-                        ReportImage.exportArchivePng(entry, isDark, out)
-                    }
-                }
-                if (direct != null) {
-                    Toast.makeText(ctx, if (direct) "$okToast ($fileName)" else failToast, Toast.LENGTH_SHORT).show()
-                } else {
-                    pendingExport = entry
-                    exportImageLauncher.launch(fileName)
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                ReportImage.saveToGallery(ctx, fileName) { out ->
+                    ReportImage.exportArchivePng(entry, isDark, out)
                 }
             }
-        } else {
-            pendingExport = entry
-            exportImageLauncher.launch(fileName)
+            if (saved) {
+                Toast.makeText(ctx, galleryOkToast, Toast.LENGTH_SHORT).show()
+            } else {
+                pendingExport = entry
+                exportImageLauncher.launch(fileName)
+            }
         }
     }
 

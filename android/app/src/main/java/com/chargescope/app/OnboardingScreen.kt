@@ -527,13 +527,13 @@ private fun StepBasicPermissions(
         Text(
             if (isScopedStorage) {
                 tr(
-                    "Android 11+ 采用分区存储，导出时通过系统选择器安全写入，无需全局存储权限；也可提前授权快捷导出目录。",
-                    "Android 11+ uses Scoped Storage without broad permission. Optionally pick a quick export folder below.",
+                    "Android 11+ 采用分区存储，无需全局存储权限：报告图片将直接保存至相册 Pictures/ChargeScope；下方可提前为 CSV 与诊断日志授权快捷导出目录。",
+                    "Android 11+ uses Scoped Storage with no broad permission: report images save to Pictures/ChargeScope; optionally pick a quick export folder for CSV & logs below.",
                 )
             } else {
                 tr(
-                    "用于导出充电 CSV 曲线与诊断日志到公共存储目录。",
-                    "Used to export recorded CSV files and diagnostic logs.",
+                    "用于导出充电 CSV 曲线、诊断日志与报告图片到公共存储目录。",
+                    "Used to export recorded CSV files, diagnostic logs, and report images.",
                 )
             },
             style = MaterialTheme.typography.bodySmall,

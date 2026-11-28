@@ -1,5 +1,6 @@
 package com.chargescope.app
 
+import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -8,6 +9,8 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -23,6 +26,41 @@ object ReportImage {
     private const val CARD_PAD = 40f
     private const val CARD_RADIUS = 36f
     private const val TILE_RADIUS = 24f
+
+    /** Saves a PNG directly into Pictures/ChargeScope via MediaStore on Android 10+ (zero storage permission needed). */
+    fun saveToGallery(
+        ctx: Context,
+        fileName: String,
+        writer: (OutputStream) -> Boolean,
+    ): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val resolver = ctx.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/ChargeScope")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+        return try {
+            val ok = resolver.openOutputStream(uri)?.use(writer) ?: false
+            if (ok) {
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                true
+            } else {
+                resolver.delete(uri, null, null)
+                false
+            }
+        } catch (_: Exception) {
+            try {
+                resolver.delete(uri, null, null)
+            } catch (_: Exception) {
+            }
+            false
+        }
+    }
 
     private data class ReportSpec(
         val timestampMs: Long,

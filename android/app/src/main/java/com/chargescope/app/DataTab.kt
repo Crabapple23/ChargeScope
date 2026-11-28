@@ -2,6 +2,7 @@ package com.chargescope.app
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
@@ -48,6 +49,14 @@ private val EXPORT_TS_FMT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
 internal fun exportTimestamp(): String =
     Instant.ofEpochMilli(System.currentTimeMillis()).atZone(ZoneId.systemDefault()).format(EXPORT_TS_FMT)
+
+private fun formatExportTreeLabel(treeUriStr: String): String = try {
+    val docId = DocumentsContract.getTreeDocumentId(Uri.parse(treeUriStr))
+    val idx = docId.indexOf(':')
+    if (idx >= 0 && idx + 1 < docId.length) docId.substring(idx + 1) else docId
+} catch (_: Exception) {
+    treeUriStr
+}
 
 /** Writes directly into the user's pre-authorized SAF folder; returns null if tree is unavailable/revoked. */
 internal fun exportToAuthorizedTree(
@@ -141,6 +150,19 @@ internal fun DataTab() {
         auto = true
         Prefs.setAutoRecord(ctx, true)
         SamplingService.send(ctx, SamplingService.ACTION_ARM)
+    }
+
+    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                ctx.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            } catch (_: Exception) {
+            }
+            AppSettings.setExportTreeUri(ctx, uri.toString())
+        }
     }
 
     val prefs by AppSettings.prefs.collectAsState()
@@ -335,16 +357,39 @@ internal fun DataTab() {
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text(tr("导出诊断日志", "Export Diagnostic Log")) }
-        if (prefs.exportTreeUri != null) {
+        val treeUri = prefs.exportTreeUri
+        if (treeUri != null) {
             Text(
-                tr("已启用快捷导出目录：点击导出将直接写入已授权目录。", "Quick export folder active: exports write directly to your authorized folder."),
+                tr(
+                    "CSV / 日志快捷目录：${formatExportTreeLabel(treeUri)}（报告图片默认存入相册 Pictures/ChargeScope）",
+                    "CSV / Log folder: ${formatExportTreeLabel(treeUri)} (report images save to Pictures/ChargeScope)",
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { treeLauncher.launch(null) },
+                    modifier = Modifier.weight(1f),
+                ) { Text(tr("更换目录", "Change Folder")) }
+                OutlinedButton(
+                    onClick = { AppSettings.setExportTreeUri(ctx, null) },
+                    modifier = Modifier.weight(1f),
+                ) { Text(tr("清除目录", "Clear Folder")) }
+            }
+        } else {
+            Text(
+                tr(
+                    "报告图片默认保存至相册 Pictures/ChargeScope；下方可为 CSV 与诊断日志设置快捷导出目录。",
+                    "Report images save to Pictures/ChargeScope. Optionally set a quick export folder for CSV & logs below.",
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedButton(
-                onClick = { AppSettings.setExportTreeUri(ctx, null) },
+                onClick = { treeLauncher.launch(null) },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(tr("清除已授权导出目录（改回每次选择）", "Clear Export Folder (Ask Every Time)")) }
+            ) { Text(tr("设置快捷导出目录（CSV / 日志）", "Set Quick Export Folder (CSV / Log)")) }
         }
         val clearedMsg = tr("已清除记录和日志", "Records and logs cleared")
         OutlinedButton(
