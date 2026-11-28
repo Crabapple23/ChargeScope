@@ -88,7 +88,10 @@ internal fun DeviceTab(onOpenSettings: () -> Unit) {
             Text(if (deepScanning) tr("深度扫描中…", "Deep Scanning…") else tr("一键深度扫描（全量充电节点）", "Deep Scan All Charging Nodes"))
         }
         Text(
-            tr("扫描本机全部可读的 power_supply / Type-C / 厂商快充节点，结果会自动附带在“导出诊断日志”中。", "Scans all readable power_supply, Type-C, and vendor nodes. Included in exported diagnostic logs."),
+            tr(
+                "扫描本机可读的 power_supply / Type-C / 厂商快充节点，以及 Health / USB / batterystats / 充电属性，结果会自动附带在“导出诊断日志”中。",
+                "Scans readable power_supply, Type-C, and vendor nodes, plus Health / USB / batterystats / charging properties. Included in exported diagnostic logs.",
+            ),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -221,8 +221,8 @@ fun SettingsScreen(
                 }
                 Text(
                     tr(
-                        "默认关闭。开启后底部导航变为悬浮半透明液态玻璃胶囊；Material 3 与 MIUIX 两种风格的开关状态分别独立保存。",
-                        "Off by default. Turns the bottom bar into a floating translucent Liquid Glass capsule; saved independently for Material 3 and MIUIX.",
+                        "默认关闭。开启后底部导航变为悬浮液态玻璃胶囊，Android 12+ 支持 GPU 实时毛玻璃模糊与左右滑动切页（低版本自动回退磨砂半透明）；Material 3 与 MIUIX 开关状态独立保存。",
+                        "Off by default. Floating Liquid Glass capsule bar with real-time GPU backdrop blur and drag-to-switch on Android 12+ (frosted fallback on older versions); saved per UI style.",
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

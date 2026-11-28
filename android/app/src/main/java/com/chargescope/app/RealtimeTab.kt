@@ -48,8 +48,8 @@ internal fun RealtimeTab() {
     val s = ui.latest
     val dual = prefs.dualCell
     Section(
-        if (dual) tr("电池（公开 API · 双电芯）", "Battery (Public API · Dual-Cell)")
-        else tr("电池（公开 API）", "Battery (Public API)"),
+        if (dual) tr("电池与充电状态 · 双电芯", "Battery & Charging · Dual-Cell")
+        else tr("电池与充电状态", "Battery & Charging"),
     ) {
         KV(tr("电量", "Level"), s?.levelPct?.let { "$it %" })
         KV(tr("状态", "Status"), statusText(s?.status, isEn))
@@ -195,9 +195,9 @@ private fun PowerChart(series: Series) {
     }
     Text(
         tr(
-            "纵轴：功率（瓦）；横轴：时间，最右为当前。电池侧功率 = 电池端电压 × |电池电流|，是进入电池的功率，" +
-                "会低于充电器输出。输入侧功率 = 充电口电压 × 电流，仅在 Root/Shizuku 能读取时显示。",
-            "Y-axis: power (W); X-axis: time (now on right). Battery power = V_bat × |I_bat| (lower than charger output). Input power requires Root/Shizuku.",
+            "纵轴：功率（瓦）；横轴：时间，最右为当前。电池侧功率 = 电池端电压 × |电池电流|（双电芯模式下上报单芯电压时按 ×2 换算），" +
+                "低于充电器输出。输入侧功率 = 充电口电压 × 电流，仅在 Root/Shizuku 可读到输入节点时显示。",
+            "Y-axis: power (W); X-axis: time (now on right). Battery power = V_bat × |I_bat| (×2 in dual-cell mode for single-cell voltage readings). Input power requires readable Root/Shizuku input nodes.",
         ),
         style = small,
         color = MaterialTheme.colorScheme.onSurfaceVariant,

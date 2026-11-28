@@ -241,7 +241,10 @@ internal fun DataTab() {
                 ) { Text(if (checking) tr("检测中…", "Probing…") else tr("检测", "Test")) }
             }
             Text(
-                tr("Shizuku 提供 adb shell 权限：直接读取 sysfs 与 dumpsys battery，不派生额外 shell 进程。", "Shizuku provides adb shell access to read sysfs and dumpsys battery without extra shells."),
+                tr(
+                    "Shizuku 提供 adb shell (uid=2000) 只读权限：读取 sysfs 及 dumpsys battery / Health / batterystats（Android 14+ 部分机型 sysfs 受 SELinux 限制，完整内核节点需 Root）。",
+                    "Shizuku provides read-only adb shell (uid=2000) access for sysfs and dumpsys battery / Health / batterystats (on Android 14+, sysfs may be SELinux-restricted; full kernel nodes require Root).",
+                ),
                 style = MaterialTheme.typography.bodySmall,
             )
         }
