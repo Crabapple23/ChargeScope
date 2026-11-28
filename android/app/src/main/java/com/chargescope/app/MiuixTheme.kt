@@ -70,13 +70,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import top.yukonga.miuix.kmp.basic.Card as LibMiuixCard
-import top.yukonga.miuix.kmp.basic.Switch as LibMiuixSwitch
-import top.yukonga.miuix.kmp.theme.Colors as MiuixLibColors
-import top.yukonga.miuix.kmp.theme.MiuixTheme as LibMiuixTheme
-import top.yukonga.miuix.kmp.theme.darkColorScheme as miuixLibDarkColorScheme
-import top.yukonga.miuix.kmp.theme.lightColorScheme as miuixLibLightColorScheme
-import top.yukonga.miuix.kmp.utils.SmoothRoundedCornerShape
 
 val LocalIsMiuix = compositionLocalOf { false }
 val LocalIsMiuixFull = compositionLocalOf { false }
@@ -171,43 +164,12 @@ internal fun miuixColorScheme(dark: Boolean, dynamicColor: Boolean, oledBlack: B
 }
 
 @Composable
-internal fun miuixLibColors(dark: Boolean, dynamicColor: Boolean, oledBlack: Boolean): MiuixLibColors {
-    val ctx = LocalContext.current
-    val dyn = if (dynamicColor && Build.VERSION.SDK_INT >= 31) {
-        if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-    } else null
-    val accent = dyn?.primary ?: if (dark) MiuixBlueDark else MiuixBlueLight
-    val onAccent = dyn?.onPrimary ?: Color.White
-    return if (dark) {
-        if (oledBlack) {
-            miuixLibDarkColorScheme(
-                primary = accent,
-                onPrimary = onAccent,
-                background = Color.Black,
-                surface = Color.Black,
-                surfaceContainer = Color(0xFF141416),
-            )
-        } else {
-            miuixLibDarkColorScheme(primary = accent, onPrimary = onAccent)
-        }
-    } else {
-        miuixLibLightColorScheme(primary = accent, onPrimary = onAccent)
-    }
-}
-
-@Composable
 internal fun MiuixCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     if (LocalIsMiuixFull.current) {
-        LibMiuixCard(
-            modifier = modifier.fillMaxWidth(),
-            color = LibMiuixTheme.colorScheme.surfaceContainer,
-            cornerRadius = 16.dp,
-        ) {
-            content()
-        }
+        MiuixLibCard(modifier = modifier, content = content)
     } else {
         Surface(
             modifier = modifier.fillMaxWidth(),
@@ -229,7 +191,7 @@ internal fun MiuixSwitch(
     enabled: Boolean = true,
 ) {
     if (LocalIsMiuixFull.current) {
-        LibMiuixSwitch(
+        MiuixLibSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             enabled = enabled,

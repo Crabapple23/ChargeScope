@@ -22,8 +22,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import top.yukonga.miuix.kmp.basic.SmallTitle as MiuixSmallTitle
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
@@ -54,7 +52,7 @@ data class AppPrefs(
 ) {
     val isEn: Boolean get() = lang == "en"
     val isMiuix: Boolean get() = uiStyle >= 1
-    val isMiuixFull: Boolean get() = uiStyle == 2
+    val isMiuixFull: Boolean get() = BuildConfig.HAS_MIUIX_LIB && uiStyle == 2
     val liquidGlassBar: Boolean get() = if (isMiuix) liquidGlassMiuix else liquidGlassM3
     val fontMultiplier: Float
         get() = when (fontTier) {
@@ -195,7 +193,7 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             if (LocalIsMiuixFull.current) {
-                MiuixSmallTopAppBar(
+                MiuixLibSmallTopAppBar(
                     title = tr("软件设置", "App Settings"),
                     navigationIcon = {
                         IconButton(onClick = onBack) {
@@ -461,7 +459,7 @@ fun SettingsScreen(
             SettingsCard(tr("关于", "About")) {
                 Text("充了个电 (ChargeScope) v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "com.chargescope.hanhan.app",
+                    BuildConfig.APPLICATION_ID,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -484,10 +482,7 @@ fun SettingsScreen(
 private fun SettingsCard(title: String, content: @Composable () -> Unit) {
     if (LocalIsMiuixFull.current) {
         Column(Modifier.fillMaxWidth()) {
-            MiuixSmallTitle(
-                text = title,
-                insideMargin = PaddingValues(start = 12.dp, top = 4.dp, bottom = 6.dp),
-            )
+            MiuixLibSmallTitle(text = title)
             MiuixCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     content()

@@ -41,32 +41,37 @@ jobs:
       - run: chmod +x gradlew
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
+        run: ./gradlew testStandardDebugUnitTest testMiuixDebugUnitTest --no-daemon --stacktrace
 
-      - name: Assemble signed release APK
+      - name: Assemble signed release APKs (standard + miuix)
         env:
           KEYSTORE_FILE: release.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        run: ./gradlew assembleStandardRelease assembleMiuixRelease --no-daemon --stacktrace
 
-      - name: Rename APK with tag
+      - name: Rename APKs with tag
         shell: bash
         run: |
-          cp app/build/outputs/apk/release/app-release.apk "ChargeScope-${GITHUB_REF_NAME}.apk"
+          cp app/build/outputs/apk/standard/release/app-standard-release.apk "ChargeScope-${GITHUB_REF_NAME}.apk"
+          cp app/build/outputs/apk/miuix/release/app-miuix-release.apk "ChargeScope-${GITHUB_REF_NAME}-miuix.apk"
 
-      - name: Upload release artifact
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ChargeScope-${{ github.ref_name }}
-          path: android/ChargeScope-${{ github.ref_name }}.apk
+          path: |
+            android/ChargeScope-${{ github.ref_name }}.apk
+            android/ChargeScope-${{ github.ref_name }}-miuix.apk
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           body_path: RELEASE_NOTES.md
-          files: android/ChargeScope-${{ github.ref_name }}.apk
+          files: |
+            android/ChargeScope-${{ github.ref_name }}.apk
+            android/ChargeScope-${{ github.ref_name }}-miuix.apk
 
       - name: Clean up keystore
         if: always()

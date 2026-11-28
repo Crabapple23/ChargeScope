@@ -17,6 +17,22 @@ android {
         resourceConfigurations += listOf("zh", "en")
     }
 
+    flavorDimensions += "ui"
+    productFlavors {
+        create("standard") {
+            dimension = "ui"
+            buildConfigField("boolean", "HAS_MIUIX_LIB", "false")
+            resValue("string", "app_name", "充了个电")
+        }
+        create("miuix") {
+            dimension = "ui"
+            applicationIdSuffix = ".miuix"
+            versionNameSuffix = "-miuix"
+            buildConfigField("boolean", "HAS_MIUIX_LIB", "true")
+            resValue("string", "app_name", "充了个电 MIUIX")
+        }
+    }
+
     signingConfigs {
         val ksPath = System.getenv("KEYSTORE_FILE")
         if (!ksPath.isNullOrBlank()) {
@@ -76,7 +92,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.miuix.android)
+    "miuixImplementation"(libs.miuix.android)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)

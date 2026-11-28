@@ -96,8 +96,8 @@ object Prefs {
     fun dualCellPrompted(c: Context): Boolean = sp(c).getBoolean("dual_cell_prompted", false)
     fun setDualCellPrompted(c: Context, v: Boolean) = sp(c).edit().putBoolean("dual_cell_prompted", v).apply()
 
-    /** 0 = Material 3 (default), 1 = MIUIX (HyperOS style) */
-    fun uiStyle(c: Context): Int = sp(c).getInt("ui_style", 0)
+    /** 0 = Material 3, 1 = MIUIX Lite, 2 = MIUIX Full (default in miuix flavor) */
+    fun uiStyle(c: Context): Int = sp(c).getInt("ui_style", if (BuildConfig.HAS_MIUIX_LIB) 2 else 0)
     fun setUiStyle(c: Context, v: Int) = sp(c).edit().putInt("ui_style", v).apply()
 
     fun liquidGlassM3(c: Context): Boolean = sp(c).getBoolean("liquid_glass_m3", false)

@@ -38,10 +38,6 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
-import top.yukonga.miuix.kmp.extra.SuperDialog as MiuixSuperDialog
-import top.yukonga.miuix.kmp.theme.MiuixTheme as LibMiuixTheme
-import top.yukonga.miuix.kmp.utils.MiuixPopupUtils.Companion.MiuixPopupHost
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -213,10 +209,6 @@ private fun App() {
         Density(baseDensity.density, baseDensity.fontScale * prefs.fontMultiplier)
     }
 
-    val miuixColors = if (prefs.isMiuixFull) {
-        miuixLibColors(dark = dark, dynamicColor = prefs.dynamicColor, oledBlack = prefs.oledBlack)
-    } else null
-
     CompositionLocalProvider(
         LocalDensity provides scaledDensity,
         LocalIsEn provides prefs.isEn,
@@ -275,7 +267,7 @@ private fun App() {
                     topBar = {
                         if (prefs.isMiuixFull) {
                             val currentTab = TABS.getOrElse(tab) { TABS[0] }
-                            MiuixSmallTopAppBar(
+                            MiuixLibSmallTopAppBar(
                                 title = tr(currentTab.zh, currentTab.en),
                                 actions = {
                                     if (tab == 4) {
@@ -404,7 +396,7 @@ private fun App() {
                 if (prefs.isMiuixFull) {
                     val dualShowState = remember { mutableStateOf(false) }
                     dualShowState.value = showDualPrompt
-                    MiuixSuperDialog(
+                    MiuixLibSuperDialog(
                         show = dualShowState,
                         title = tr("检测到可能为双电芯设备", "Possible Dual-Cell Device"),
                         summary = (dualCellReason ?: "") + "\n\n" + tr(
@@ -435,7 +427,7 @@ private fun App() {
                             )
                         }
                     }
-                    MiuixPopupHost()
+                    MiuixLibPopupHost()
                 } else if (showDualPrompt) {
                     AlertDialog(
                         onDismissRequest = {
@@ -471,8 +463,12 @@ private fun App() {
             colorScheme = colors,
             shapes = if (prefs.isMiuix) MiuixShapes else MaterialTheme.shapes,
         ) {
-            if (miuixColors != null) {
-                LibMiuixTheme(colors = miuixColors) {
+            if (prefs.isMiuixFull) {
+                MiuixLibThemeWrapper(
+                    dark = dark,
+                    dynamicColor = prefs.dynamicColor,
+                    oledBlack = prefs.oledBlack,
+                ) {
                     appBody()
                 }
             } else {

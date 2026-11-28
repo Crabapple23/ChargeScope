@@ -54,7 +54,6 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.extra.SuperDialog as MiuixSuperDialog
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -311,7 +310,7 @@ internal fun ArchiveTab() {
     if (miuixFull) {
         val showEdit = remember { mutableStateOf(false) }
         showEdit.value = editing != null
-        MiuixSuperDialog(
+        MiuixLibSuperDialog(
             show = showEdit,
             title = tr("管理存档", "Manage Archive"),
             onDismissRequest = {

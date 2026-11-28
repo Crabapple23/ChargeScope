@@ -47,12 +47,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
-import top.yukonga.miuix.kmp.basic.SmallTitle as MiuixSmallTitle
-import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
-import top.yukonga.miuix.kmp.basic.TextField as MiuixTextField
-import top.yukonga.miuix.kmp.theme.MiuixTheme as LibMiuixTheme
-import top.yukonga.miuix.kmp.utils.SmoothRoundedCornerShape
 
 val LocalBottomBarExtra = compositionLocalOf { 0.dp }
 
@@ -78,10 +72,7 @@ internal fun ScrollBody(content: @Composable () -> Unit) {
 internal fun Section(title: String, content: @Composable () -> Unit) {
     if (LocalIsMiuixFull.current) {
         Column(Modifier.fillMaxWidth()) {
-            MiuixSmallTitle(
-                text = title,
-                insideMargin = PaddingValues(start = 12.dp, top = 4.dp, bottom = 6.dp),
-            )
+            MiuixLibSmallTitle(text = title)
             MiuixCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     content()
@@ -120,13 +111,7 @@ internal fun AppButton(
     enabled: Boolean = true,
 ) {
     if (LocalIsMiuixFull.current) {
-        MiuixTextButton(
-            text = text,
-            onClick = onClick,
-            modifier = modifier,
-            enabled = enabled,
-            colors = MiuixButtonDefaults.textButtonColorsPrimary(),
-        )
+        MiuixLibButton(text = text, onClick = onClick, modifier = modifier, enabled = enabled)
     } else {
         Button(onClick = onClick, modifier = modifier, enabled = enabled) {
             Text(text)
@@ -143,15 +128,7 @@ internal fun AppSecondaryButton(
     danger: Boolean = false,
 ) {
     if (LocalIsMiuixFull.current) {
-        MiuixTextButton(
-            text = text,
-            onClick = onClick,
-            modifier = modifier,
-            enabled = enabled,
-            colors = MiuixButtonDefaults.textButtonColors(
-                textColor = if (danger) MaterialTheme.colorScheme.error else LibMiuixTheme.colorScheme.onSecondaryVariant,
-            ),
-        )
+        MiuixLibSecondaryButton(text = text, onClick = onClick, modifier = modifier, enabled = enabled, danger = danger)
     } else {
         OutlinedButton(onClick = onClick, modifier = modifier, enabled = enabled) {
             Text(text, color = if (danger) MaterialTheme.colorScheme.error else Color.Unspecified)
@@ -168,7 +145,7 @@ internal fun AppTextField(
     modifier: Modifier = Modifier,
 ) {
     if (LocalIsMiuixFull.current) {
-        MiuixTextField(
+        MiuixLibTextField(
             value = value,
             onValueChange = onValueChange,
             label = if (placeholder.isNotEmpty() && value.isEmpty()) placeholder else label,
@@ -248,7 +225,7 @@ internal fun <T> OptionChips(options: List<Pair<String, T>>, selected: T, onSele
                     animationSpec = tween(160),
                     label = "miuixChipFg",
                 )
-                val chipShape = remember { SmoothRoundedCornerShape(12.dp) }
+                val chipShape = remember { miuixChipShape() }
                 Surface(
                     shape = chipShape,
                     color = bg,
@@ -277,11 +254,18 @@ internal fun UiStyleSelector(selected: Int, onSelect: (Int) -> Unit) {
     val miuix = LocalIsMiuix.current
     val outerShape = RoundedCornerShape(if (miuix) 16.dp else 14.dp)
     val innerShape = RoundedCornerShape(if (miuix) 12.dp else 10.dp)
-    val items = listOf(
-        Triple(0, "Material 3", tr("默认", "Default")),
-        Triple(1, tr("MIUIX 轻享", "MIUIX Lite"), tr("原风味", "Lite")),
-        Triple(2, tr("MIUIX 完整", "MIUIX Full"), tr("原生组件", "Full Lib")),
-    )
+    val items = if (BuildConfig.HAS_MIUIX_LIB) {
+        listOf(
+            Triple(0, "Material 3", tr("默认", "Default")),
+            Triple(1, tr("MIUIX 轻享", "MIUIX Lite"), tr("原风味", "Lite")),
+            Triple(2, tr("MIUIX 完整", "MIUIX Full"), tr("原生组件", "Full Lib")),
+        )
+    } else {
+        listOf(
+            Triple(0, "Material 3", tr("默认风格", "Default")),
+            Triple(1, "MIUIX", tr("HyperOS 风格", "HyperOS")),
+        )
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = outerShape,
