@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -266,6 +267,12 @@ fun SettingsScreen(
                     onSelect = { AppSettings.setTheme(ctx, it) },
                 )
                 AnimatedVisibility(visible = prefs.themeMode == 3) {
+                    val isDarkUi = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+                    val dialogTheme = if (isDarkUi) {
+                        android.R.style.Theme_DeviceDefault_Dialog_Alert
+                    } else {
+                        android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
+                    }
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -275,6 +282,7 @@ fun SettingsScreen(
                                 onClick = {
                                     TimePickerDialog(
                                         ctx,
+                                        dialogTheme,
                                         { _, h, m -> AppSettings.setDarkSchedule(ctx, h * 60 + m, prefs.darkEndMin) },
                                         prefs.darkStartMin / 60,
                                         prefs.darkStartMin % 60,
@@ -289,6 +297,7 @@ fun SettingsScreen(
                                 onClick = {
                                     TimePickerDialog(
                                         ctx,
+                                        dialogTheme,
                                         { _, h, m -> AppSettings.setDarkSchedule(ctx, prefs.darkStartMin, h * 60 + m) },
                                         prefs.darkEndMin / 60,
                                         prefs.darkEndMin % 60,
