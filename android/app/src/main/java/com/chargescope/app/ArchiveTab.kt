@@ -1,6 +1,8 @@
 package com.chargescope.app
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -34,12 +36,17 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -126,16 +133,64 @@ private fun ArchiveCard(e: ArchiveEntry, collapsible: Boolean, onLongPress: () -
 @Composable
 internal fun ArchiveTab() {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val items by Archive.items.collectAsState()
+    val prefs by AppSettings.prefs.collectAsState()
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val reversed = remember(items) { items.asReversed() }
     var confirm by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<ArchiveEntry?>(null) }
     var draft by remember { mutableStateOf("") }
     var confirmDeleteOne by remember { mutableStateOf(false) }
+    var pendingExport by remember { mutableStateOf<ArchiveEntry?>(null) }
     val collapsible = items.size > 1
     val archivedToast = tr("已增加当前状态为存档", "Saved current state to archive")
     val noDataToast = tr("暂无采样数据，无法存档", "No sample yet")
     val deletedToast = tr("已删除该条存档", "Archive entry deleted")
+    val okToast = tr("报告图片已导出", "Report image exported")
+    val failToast = tr("报告图片导出失败", "Failed to export report image")
+
+    val exportImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
+        val entry = pendingExport
+        pendingExport = null
+        if (uri != null && entry != null) {
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    try {
+                        ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                            ReportImage.exportArchivePng(entry, isDark, out)
+                        } ?: false
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+                Toast.makeText(ctx, if (ok) okToast else failToast, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val startExportImage: (ArchiveEntry) -> Unit = { entry ->
+        val fileName = "chargescope-archive-${exportTimestamp()}.png"
+        val tree = prefs.exportTreeUri
+        if (tree != null) {
+            scope.launch {
+                val direct = withContext(Dispatchers.IO) {
+                    exportToAuthorizedTree(ctx, tree, "image/png", fileName) { out ->
+                        ReportImage.exportArchivePng(entry, isDark, out)
+                    }
+                }
+                if (direct != null) {
+                    Toast.makeText(ctx, if (direct) "$okToast ($fileName)" else failToast, Toast.LENGTH_SHORT).show()
+                } else {
+                    pendingExport = entry
+                    exportImageLauncher.launch(fileName)
+                }
+            }
+        } else {
+            pendingExport = entry
+            exportImageLauncher.launch(fileName)
+        }
+    }
 
     editing?.let { target ->
         AlertDialog(
@@ -155,6 +210,17 @@ internal fun ArchiveTab() {
                         maxLines = 4,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    OutlinedButton(
+                        onClick = {
+                            val snapshot = target.copy(note = draft.trim())
+                            editing = null
+                            confirmDeleteOne = false
+                            startExportImage(snapshot)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(tr("导出报告图片", "Export Report Image"))
+                    }
                     OutlinedButton(
                         onClick = {
                             if (confirmDeleteOne) {
@@ -210,8 +276,8 @@ internal fun ArchiveTab() {
             Section(tr("协议识别存档（${items.size} 条，仅保存在本机）", "Protocol Archive (${items.size}, local only)")) {
                 Text(
                     tr(
-                        "当出现“已确认 / 可能 / 证据冲突”的识别结果时自动存档；同一次充电内结果变化会新增一条，拔出充电器时写入峰值。长按任意存档可编辑备注或删除。",
-                        "Auto-saved on Confirmed / Likely / Conflicting results; updates peaks on unplug. Long-press any entry to edit note or delete.",
+                        "当出现“已确认 / 可能 / 证据冲突”的识别结果时自动存档；同一次充电内结果变化会新增一条，拔出充电器时写入峰值。长按任意存档可编辑备注、导出报告图片或删除。",
+                        "Auto-saved on Confirmed / Likely / Conflicting results; updates peaks on unplug. Long-press any entry to edit note, export report image, or delete.",
                     ),
                     style = MaterialTheme.typography.bodySmall,
                 )
