@@ -162,7 +162,7 @@ internal fun DeviceTab(onOpenSettings: () -> Unit) {
 
     if (sortedNodes.isNotEmpty()) {
         Text(
-            tr("已读节点明细（点击展开）", "Node Details (Tap to Expand)"),
+            tr("已读节点明细（点击下方各节点查看属性）", "Node Details (Tap any node below)"),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 6.dp, top = 2.dp),

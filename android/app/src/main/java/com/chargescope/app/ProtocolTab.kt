@@ -1,7 +1,12 @@
 package com.chargescope.app
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,12 +24,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 private fun statusColors(status: Status): Pair<Color, Color> {
@@ -90,25 +100,70 @@ private fun ConclusionMetricTile(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun ProtocolTab() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val ui by Sampler.state.collectAsState()
+    val prefs by AppSettings.prefs.collectAsState()
     val miuix = LocalIsMiuix.current
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val a = ui.analysis
     if (a == null) {
         Text(tr("等待首次采样…", "Waiting for first sample…"))
         return
     }
 
+    val okToast = tr("报告图片已导出", "Report image exported")
+    val failToast = tr("报告图片导出失败", "Failed to export report image")
+    val exportImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    try {
+                        ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                            ReportImage.exportPng(ctx, Sampler.state.value, prefs.dualCell, isDark, out)
+                        } ?: false
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+                Toast.makeText(ctx, if (ok) okToast else failToast, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val onLongPressExport: () -> Unit = {
+        val fileName = "chargescope-report-${exportTimestamp()}.png"
+        val tree = prefs.exportTreeUri
+        if (tree != null) {
+            scope.launch {
+                val direct = withContext(Dispatchers.IO) {
+                    exportToAuthorizedTree(ctx, tree, "image/png", fileName) { out ->
+                        ReportImage.exportPng(ctx, Sampler.state.value, prefs.dualCell, isDark, out)
+                    }
+                }
+                if (direct != null) {
+                    Toast.makeText(ctx, if (direct) "$okToast ($fileName)" else failToast, Toast.LENGTH_SHORT).show()
+                } else {
+                    exportImageLauncher.launch(fileName)
+                }
+            }
+        } else {
+            exportImageLauncher.launch(fileName)
+        }
+    }
+
     val (badgeFg, badgeBg) = statusColors(a.status)
     val pad = if (miuix) 16.dp else 14.dp
 
-    // 1. Hero Conclusion Card
+    // 1. Hero Conclusion Card (long-press to export PNG report)
     ProtocolContainer {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .combinedClickable(onClick = {}, onLongClick = onLongPressExport)
                 .padding(pad),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -184,6 +239,12 @@ internal fun ProtocolTab() {
                     }
                 }
             }
+
+            Text(
+                text = tr("长按此卡片导出报告图片", "Long-press this card to export report image"),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 
@@ -272,18 +333,95 @@ internal fun ProtocolTab() {
     // 4. Collapsible reference & evidence sections
     if (a.candidateSpecs.isNotEmpty()) {
         Fold(
-            tr("候选协议档位说明（参考上限）", "Candidate Tier Specs (Reference)"),
-            tr("${a.candidateSpecs.size} 条", "${a.candidateSpecs.size}"),
+            tr("候选协议档位参考", "Candidate Tier Specs"),
+            tr("${a.candidateSpecs.size} 项", "${a.candidateSpecs.size}"),
         ) {
-            a.candidateSpecs.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+            a.candidateSpecs.forEach { spec ->
+                val sep = spec.indexOf('：')
+                val title = if (sep in 1..32) spec.substring(0, sep) else null
+                val detail = if (title != null) spec.substring(sep + 1).trim() else spec
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        if (title != null) {
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        Text(
+                            text = detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
         }
     }
-    Fold(
-        tr("证据（L4 驱动 > L3 输入 > L2 功率 > L1 品牌）", "Evidence (L4 > L3 > L2 > L1)"),
-        tr("${a.evidence.size} 条", "${a.evidence.size}"),
-    ) {
-        if (a.evidence.isEmpty()) Text(tr("暂无证据", "No evidence")) else a.evidence.sortedByDescending { it.level }.forEach {
-            Text("L${it.level}  ${it.text}", style = MaterialTheme.typography.bodySmall)
+    val l4Count = a.evidence.count { it.level == 4 }
+    val evSummary = if (l4Count > 0) tr("L4×$l4Count · 共 ${a.evidence.size} 条", "L4×$l4Count · ${a.evidence.size}")
+        else tr("${a.evidence.size} 条", "${a.evidence.size}")
+    Fold(tr("识别证据", "Evidence"), evSummary) {
+        if (a.evidence.isEmpty()) {
+            Text(tr("暂无证据", "No evidence"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            val sortedEv = a.evidence.sortedByDescending { it.level }
+            sortedEv.forEachIndexed { idx, ev ->
+                if (idx > 0) {
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                    )
+                }
+                val lvColor = when (ev.level) {
+                    4 -> if (isDark) Color(0xFF66BB6A) else Color(0xFF2E7D32)
+                    3 -> if (isDark) Color(0xFF4FC3F7) else Color(0xFF1976D2)
+                    2 -> if (isDark) Color(0xFFFFB74D) else Color(0xFFEF6C00)
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 1.dp)
+                            .background(lvColor.copy(alpha = 0.14f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = "L${ev.level}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = lvColor,
+                        )
+                    }
+                    Text(
+                        text = ev.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            Text(
+                text = tr("等级说明：L4 驱动报告 > L3 输入电参 > L2 电池功率 > L1 品牌参考", "Levels: L4 Driver > L3 Input > L2 Power > L1 Brand"),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
     }
     if (a.limitations.isNotEmpty()) {

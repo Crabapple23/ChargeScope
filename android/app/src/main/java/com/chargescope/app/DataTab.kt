@@ -46,11 +46,11 @@ private val PRIV_OPTS = listOf("关闭" to 0L, "Root" to 1L, "Shizuku" to 2L)
 
 private val EXPORT_TS_FMT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
-private fun exportTimestamp(): String =
+internal fun exportTimestamp(): String =
     Instant.ofEpochMilli(System.currentTimeMillis()).atZone(ZoneId.systemDefault()).format(EXPORT_TS_FMT)
 
 /** Writes directly into the user's pre-authorized SAF folder; returns null if tree is unavailable/revoked. */
-private fun exportToAuthorizedTree(
+internal fun exportToAuthorizedTree(
     ctx: Context,
     treeUriStr: String,
     mime: String,
