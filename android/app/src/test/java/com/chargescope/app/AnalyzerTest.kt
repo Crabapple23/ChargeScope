@@ -204,6 +204,15 @@ class AnalyzerTest {
         assertEquals(500.0, Analyzer.currentMa(honorIdle)!!, 0.01)
     }
 
+    @Test fun mi10SeparatesDriverSohAndCalculatedHealth() {
+        val bms = RootNode("bms", mapOf("type" to "BMS", "soh" to "51", "charge_full" to "4229000", "charge_full_design" to "4780000", "cycle_count" to "338"))
+        val s = snap(listOf(bms))
+        assertEquals(51, Analyzer.driverSohPct(s))
+        assertEquals(88, Analyzer.calculatedHealthPct(s))
+        assertEquals(4780, Analyzer.designCapacityMah(s))
+        assertEquals(4229, Analyzer.usableCapacityMah(s))
+    }
+
     @Test fun parseRootOutput() {
         val nodes = RootScanner.parse("@@usb\ntype=USB\nonline=1\n@@battery\ncapacity=50\n")
         assertEquals(2, nodes.size)

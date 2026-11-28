@@ -4,8 +4,18 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,12 +27,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -31,9 +45,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 private val GRID_FRACTIONS = floatArrayOf(0f, 0.5f, 1f)
@@ -45,42 +61,93 @@ internal fun RealtimeTab() {
     val prefs by AppSettings.prefs.collectAsState()
     val ctx = LocalContext.current
     val isEn = LocalIsEn.current
+    val miuix = LocalIsMiuix.current
     val s = ui.latest
     val dual = prefs.dualCell
-    Section(
-        if (dual) tr("电池与充电状态 · 双电芯", "Battery & Charging · Dual-Cell")
-        else tr("电池与充电状态", "Battery & Charging"),
-    ) {
-        KV(tr("电量", "Level"), s?.levelPct?.let { "$it %" })
-        KV(tr("状态", "Status"), statusText(s?.status, isEn))
-        KV(tr("连接方式", "Plugged"), s?.let { pluggedText(it.plugged, isEn) })
-        KV(tr("电池端电压", "Battery Voltage"), fmt(s?.voltageMv?.let { it / 1000.0 }, "V"))
-        KV(tr("电池电流（绝对值）", "Battery Current"), fmt(ui.batteryCurrentMa, "mA", 0))
-        KV(tr("电池侧功率（估算）", "Battery Power (Est.)"), fmt(ui.batteryPowerW, "W"))
-        KV(tr("输入侧功率（需 Root/Shizuku）", "Input Power (Root/Shizuku)"), fmt(ui.inputPowerW, "W"))
-        Analyzer.efficiencyPct(ui.batteryPowerW, ui.inputPowerW)?.let { eff ->
-            KV(tr("估算转换效率", "Est. Efficiency"), "%.1f %%".format(eff))
-        }
-        KV(tr("温度", "Temperature"), fmt(s?.tempDeci?.let { it / 10.0 }, "°C", 1))
-        val hText = healthText(s?.health, isEn)
-        val hPct = s?.let { Analyzer.batteryHealthPct(it, dual) }
-        val designMah = s?.let { Analyzer.designCapacityMah(it, dual) }
-        val usableMah = s?.let { Analyzer.usableCapacityMah(it, dual) }
-        val cycles = s?.let { Analyzer.batteryCycleCount(it) }
-        val healthDisplay = buildList {
-            if (hText != null) add(hText)
-            if (cycles != null) add(tr("${cycles}次循环", "$cycles cycles"))
-        }.joinToString(" · ").ifEmpty { null }
-        KV(tr("健康", "Health"), healthDisplay)
-        KV(tr("估算健康", "Est. Health"), hPct?.let { "$it %" })
-        KV(tr("电池设计容量", "Design Capacity"), designMah?.let { "$it mAh" })
-        KV(tr("电池可用上限容量", "Usable Capacity"), usableMah?.let { "$it mAh" })
-        val etaText = Analyzer.estimateChargeTimeRemainingMs(s, ui.metrics)?.let { (ms, fromSys) ->
-            val dur = fmtDuration(ms, isEn)
-            if (fromSys) dur else dur + tr("（速率估算）", " (est.)")
-        }
-        KV(tr("预计充满时间", "Est. Time to Full"), etaText)
+    var detailsExpanded by remember { mutableStateOf(false) }
+    val arrowAngle = animateFloatAsState(
+        targetValue = if (detailsExpanded) 90f else 0f,
+        animationSpec = if (miuix) spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMedium) else tween(180),
+        label = "batteryCardArrow",
+    )
+
+    val batteryCardTitle = if (dual) tr("电池与充电状态 · 双电芯", "Battery & Charging · Dual-Cell")
+        else tr("电池与充电状态", "Battery & Charging")
+    val etaText = Analyzer.estimateChargeTimeRemainingMs(s, ui.metrics)?.let { (ms, fromSys) ->
+        val dur = fmtDuration(ms, isEn)
+        if (fromSys) dur else dur + tr("（速率估算）", " (est.)")
     }
+    val batteryCardBody: @Composable () -> Unit = {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { detailsExpanded = !detailsExpanded }
+                .padding(if (miuix) 16.dp else 12.dp),
+            verticalArrangement = Arrangement.spacedBy(if (miuix) 8.dp else 6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    batteryCardTitle,
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = if (miuix) FontWeight.Medium else FontWeight.Normal,
+                )
+                Text(
+                    if (detailsExpanded) tr("收起", "Less") else tr("更多详情", "More"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text("▸", Modifier.graphicsLayer { rotationZ = arrowAngle.value })
+            }
+            val hText = healthText(s?.health, isEn)
+            val driverSoh = s?.let { Analyzer.driverSohPct(it) }
+            val cycles = s?.let { Analyzer.batteryCycleCount(it) }
+            val healthDisplay = buildList {
+                if (hText != null) add(hText)
+                if (driverSoh != null) add("$driverSoh%")
+                if (cycles != null) add(tr("${cycles}次循环", "$cycles cycles"))
+            }.joinToString(" · ").ifEmpty { null }
+            // Key live metrics always visible
+            KV(tr("电量", "Level"), s?.levelPct?.let { "$it %" })
+            KV(tr("状态", "Status"), statusText(s?.status, isEn))
+            KV(tr("电池侧功率（估算）", "Battery Power (Est.)"), fmt(ui.batteryPowerW, "W"))
+            KV(tr("温度", "Temperature"), fmt(s?.tempDeci?.let { it / 10.0 }, "°C", 1))
+            KV(tr("健康", "Health"), healthDisplay)
+            KV(tr("预计充满时间", "Est. Time to Full"), etaText)
+
+            // Secondary electrical & battery-health metrics expanded on tap
+            AnimatedVisibility(
+                visible = detailsExpanded,
+                enter = if (miuix) expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(180)) else expandVertically(tween(200)),
+                exit = if (miuix) shrinkVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium)) + fadeOut(tween(140)) else shrinkVertically(tween(180)),
+            ) {
+                Column(
+                    modifier = Modifier.padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (miuix) 8.dp else 6.dp),
+                ) {
+                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                    KV(tr("连接方式", "Plugged"), s?.let { pluggedText(it.plugged, isEn) })
+                    KV(tr("电池端电压", "Battery Voltage"), fmt(s?.voltageMv?.let { it / 1000.0 }, "V"))
+                    KV(tr("电池电流（绝对值）", "Battery Current"), fmt(ui.batteryCurrentMa, "mA", 0))
+                    KV(tr("输入侧功率（需 Root/Shizuku）", "Input Power (Root/Shizuku)"), fmt(ui.inputPowerW, "W"))
+                    Analyzer.efficiencyPct(ui.batteryPowerW, ui.inputPowerW)?.let { eff ->
+                        KV(tr("估算转换效率", "Est. Efficiency"), "%.1f %%".format(eff))
+                    }
+                    val calcHealth = s?.let { Analyzer.calculatedHealthPct(it, dual) }
+                    val designMah = s?.let { Analyzer.designCapacityMah(it, dual) }
+                    val usableMah = s?.let { Analyzer.usableCapacityMah(it, dual) }
+                    KV(tr("估算健康", "Est. Health"), calcHealth?.let { "$it %" })
+                    KV(tr("电池设计容量", "Design Capacity"), designMah?.let { "$it mAh" })
+                    KV(tr("电池可用上限容量", "Usable Capacity"), usableMah?.let { "$it mAh" })
+                }
+            }
+        }
+    }
+    if (miuix) MiuixCard { batteryCardBody() } else Card(Modifier.fillMaxWidth()) { batteryCardBody() }
     Section(tr("功率曲线", "Power Chart")) {
         PowerChart(ui.series)
     }

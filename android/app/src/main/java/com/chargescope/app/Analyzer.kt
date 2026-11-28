@@ -242,8 +242,8 @@ object Analyzer {
         }
     }
 
-    /** Battery health percentage: prefer fuel-gauge `soh` across battery/vendor/health nodes, else `usable / design`. */
-    fun batteryHealthPct(s: Snapshot, dualCell: Boolean = false): Int? {
+    /** System/driver-reported fuel-gauge `soh` percentage (1..100), or null if not exposed. */
+    fun driverSohPct(s: Snapshot): Int? {
         for (n in s.rootNodes) {
             val t = n.props["type"]?.uppercase()
             val isBat = t == "BATTERY" || n.name == "battery" || n.name == "bms" || n.name == "health" ||
@@ -251,6 +251,11 @@ object Analyzer {
             if (!isBat) continue
             n.props["soh"]?.trim()?.toIntOrNull()?.takeIf { it in 1..100 }?.let { return it }
         }
+        return null
+    }
+
+    /** Software-calculated battery health percentage from `usableCapacityMah / designCapacityMah`. */
+    fun calculatedHealthPct(s: Snapshot, dualCell: Boolean = false): Int? {
         val usable = usableCapacityMah(s, dualCell)
         val design = designCapacityMah(s, dualCell)
         if (usable != null && design != null) {
@@ -259,6 +264,10 @@ object Analyzer {
         }
         return null
     }
+
+    /** Battery health percentage: prefer fuel-gauge `soh` across battery/vendor/health nodes, else `usable / design`. */
+    fun batteryHealthPct(s: Snapshot, dualCell: Boolean = false): Int? =
+        driverSohPct(s) ?: calculatedHealthPct(s, dualCell)
 
     /** Battery cycle count from sysfs or Health HAL (null if unavailable). */
     fun batteryCycleCount(s: Snapshot): Int? {

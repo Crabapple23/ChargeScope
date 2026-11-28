@@ -27,7 +27,10 @@ internal fun ProtocolTab() {
         Section(tr("候选协议（仅缩小范围，★ 为与本机品牌一致）", "Candidates (★ matches device brand)")) { a.candidates.forEach { Text("• $it") } }
     }
     if (a.candidateSpecs.isNotEmpty()) {
-        Section(tr("候选协议档位说明（参考上限）", "Candidate Tier Specs (Reference)")) {
+        Fold(
+            tr("候选协议档位说明（参考上限）", "Candidate Tier Specs (Reference)"),
+            tr("${a.candidateSpecs.size} 条", "${a.candidateSpecs.size}"),
+        ) {
             a.candidateSpecs.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
         }
     }
@@ -36,6 +39,13 @@ internal fun ProtocolTab() {
             Text("L${it.level}  ${it.text}")
         }
     }
-    Section(tr("限制说明", "Limitations")) { a.limitations.forEach { Text("• $it") } }
+    if (a.limitations.isNotEmpty()) {
+        Fold(
+            tr("限制说明", "Limitations"),
+            tr("${a.limitations.size} 条", "${a.limitations.size}"),
+        ) {
+            a.limitations.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+        }
+    }
     ui.rootError?.let { Section(tr("特权通道状态", "Privileged Channel")) { Text(it) } }
 }

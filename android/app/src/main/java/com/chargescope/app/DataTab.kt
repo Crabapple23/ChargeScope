@@ -212,48 +212,80 @@ internal fun DataTab() {
         Chips(MB_OPTS, maxMb) { maxMb = it; Prefs.setLong(ctx, Prefs.FILE_MB, it) }
     }
     Fold(
-        tr("特权增强（默认关闭，只读）", "Privileged Mode (Read-only)"),
-        when (mode) { 1L -> "Root"; 2L -> "Shizuku"; else -> tr("关闭", "Off") },
+        tr("特权增强", "Privileged Mode"),
+        when (mode) { 1L -> "Root"; 2L -> "Shizuku"; else -> tr("已关闭", "Off") },
     ) {
         Chips(privOpts, mode) {
             mode = it
             Sampler.onPrivModeChanged(ctx, it.toInt())
         }
-        if (mode == 1L) {
-            Text(tr("Root 管理器：", "Root Manager: ") + (rootProvider?.label ?: tr("未检测到 Magisk / KernelSU / APatch", "Magisk / KernelSU / APatch not detected")))
-            Text(tr("兼容 Magisk、KernelSU、APatch：复用单个持久 su 会话，减少反复授权与进程开销。", "Supports Magisk, KernelSU, and APatch via one persistent su session."), style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(
-                enabled = !checking,
-                onClick = { Sampler.startProbe(ctx, 1) },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (checking) tr("正在检测…", "Probing…") else tr("检测 Root 授权", "Test Root Access")) }
-        }
-        if (mode == 2L) {
-            Text(tr("状态：", "Status: ") + shz.display(isEn))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    enabled = !checking,
-                    onClick = { ShizukuBridge.requestPermission() },
-                ) { Text(tr("申请授权", "Request Access")) }
-                OutlinedButton(
-                    enabled = !checking,
-                    onClick = { Sampler.startProbe(ctx, 2) },
-                ) { Text(if (checking) tr("检测中…", "Probing…") else tr("检测", "Test")) }
+        when (mode) {
+            0L -> {
+                Text(
+                    tr(
+                        "默认关闭，仅使用公开电池 API。开启 Shizuku 或 Root 可只读获取更多充电与健康数据。",
+                        "Off by default (public battery API only). Enable Shizuku or Root for read-only charging and health metrics.",
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Text(
-                tr(
-                    "Shizuku 提供 adb shell (uid=2000) 只读权限：读取 sysfs 及 dumpsys battery / Health / batterystats（Android 14+ 部分机型 sysfs 受 SELinux 限制，完整内核节点需 Root）。",
-                    "Shizuku provides read-only adb shell (uid=2000) access for sysfs and dumpsys battery / Health / batterystats (on Android 14+, sysfs may be SELinux-restricted; full kernel nodes require Root).",
-                ),
-                style = MaterialTheme.typography.bodySmall,
-            )
+            1L -> {
+                KV(
+                    tr("Root 管理器", "Root Manager"),
+                    rootProvider?.label ?: tr("未检测到", "Not detected"),
+                )
+                OutlinedButton(
+                    enabled = !checking,
+                    onClick = { Sampler.startProbe(ctx, 1) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (checking) tr("正在检测…", "Probing…") else tr("检测 Root 授权", "Test Root Access")) }
+                Text(
+                    tr(
+                        "支持 Magisk / KernelSU / APatch，复用单个持久 su 会话，仅执行固定只读探测。",
+                        "Supports Magisk / KernelSU / APatch via one persistent read-only su session.",
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            2L -> {
+                KV(tr("Shizuku 状态", "Shizuku Status"), shz.display(isEn))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        enabled = !checking,
+                        onClick = { ShizukuBridge.requestPermission() },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(tr("申请授权", "Authorize")) }
+                    OutlinedButton(
+                        enabled = !checking,
+                        onClick = { Sampler.startProbe(ctx, 2) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(if (checking) tr("检测中…", "Probing…") else tr("检测连接", "Test")) }
+                }
+                Text(
+                    tr(
+                        "只读读取 sysfs 与系统充电服务；Android 14+ 部分机型 sysfs 受 SELinux 限制，完整节点需 Root。",
+                        "Reads sysfs and charging services read-only; on Android 14+ sysfs may be SELinux-restricted (full nodes require Root).",
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        privMsg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        privMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+        rootError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         Text(
-            tr("只执行固定只读采集，不写任何节点；失败会退避，连续失败 3 次自动关闭。", "Fixed read-only queries only; backs off on errors and auto-disables after 3 consecutive failures."),
+            tr(
+                "安全说明：不写入任何系统节点；连续失败 3 次自动关闭。",
+                "Safety: never writes to sysfs; auto-disables after 3 consecutive failures.",
+            ),
             style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        rootError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
     Fold(tr("记录与日志", "Records & Logs"), tr("$recordedRows 行 · ${fmtBytes(diskBytes)}", "$recordedRows rows · ${fmtBytes(diskBytes)}")) {
         Text(tr("已记录 $recordedRows 行，本机总占用约 ${fmtBytes(diskBytes)}（CSV 采用 GZIP 压缩存储，导出时自动解压）。应用无联网权限，导出不含设备标识。", "$recordedRows rows recorded, ~${fmtBytes(diskBytes)} on disk (GZIP compressed, auto-decompressed on export). Offline only."))
