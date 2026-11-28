@@ -8,7 +8,6 @@ import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -241,10 +240,17 @@ fun SettingsScreen(
                     onSelect = { AppSettings.setUiStyle(ctx, it) },
                 )
                 Text(
-                    tr(
-                        "即时生效，不影响采集与协议分析：MIUIX 轻享保留原轻量卡片风味，MIUIX 完整启用开源 miuix 原生组件库（大圆角按钮、顶栏、HyperOS 弹窗与输入框）。",
-                        "Takes effect immediately: MIUIX Lite keeps the lightweight card flavor; MIUIX Full enables the full miuix component library (buttons, top bar, dialogs, and text fields).",
-                    ),
+                    if (BuildConfig.HAS_MIUIX_LIB) {
+                        tr(
+                            "即时生效，不影响采集与协议分析：MIUIX 轻享保留原轻量卡片风味，MIUIX 完整启用开源 miuix 原生组件库（大圆角按钮、顶栏、HyperOS 弹窗与输入框）。",
+                            "Takes effect immediately: MIUIX Lite keeps the lightweight card flavor; MIUIX Full enables the full miuix component library (buttons, top bar, dialogs, and text fields).",
+                        )
+                    } else {
+                        tr(
+                            "即时生效，不影响任何采集与协议分析功能。MIUIX 风格采用 HyperOS 卡片分层、弹簧动效与精简底栏。",
+                            "Takes effect immediately without affecting any features. MIUIX brings HyperOS-style layered cards, spring motion, and a sleek bottom bar.",
+                        )
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
