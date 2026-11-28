@@ -435,8 +435,8 @@ internal fun DataTab() {
         }
         val statusBannerText = when {
             checking -> privMsg ?: tr("正在检测连接…", "Testing connection…")
-            privMsg != null -> privMsg
             rootError != null -> rootError
+            privMsg != null -> privMsg
             else -> null
         }
         if (statusBannerText != null && mode != 0L) {
