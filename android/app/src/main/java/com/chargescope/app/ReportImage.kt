@@ -2,12 +2,14 @@ package com.chargescope.app
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -27,13 +29,13 @@ object ReportImage {
     private const val CARD_RADIUS = 36f
     private const val TILE_RADIUS = 24f
 
-    /** Saves a PNG directly into Pictures/ChargeScope via MediaStore on Android 10+ (zero storage permission needed). */
+    /** Saves a PNG directly into Pictures/ChargeScope via MediaStore on Android 10+; returns the saved Uri or null. */
     fun saveToGallery(
         ctx: Context,
         fileName: String,
         writer: (OutputStream) -> Boolean,
-    ): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+    ): Uri? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
         val resolver = ctx.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
@@ -41,24 +43,37 @@ object ReportImage {
             put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/ChargeScope")
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }
-        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
         return try {
             val ok = resolver.openOutputStream(uri)?.use(writer) ?: false
             if (ok) {
                 values.clear()
                 values.put(MediaStore.Images.Media.IS_PENDING, 0)
                 resolver.update(uri, values, null, null)
-                true
+                uri
             } else {
                 resolver.delete(uri, null, null)
-                false
+                null
             }
         } catch (_: Exception) {
             try {
                 resolver.delete(uri, null, null)
             } catch (_: Exception) {
             }
-            false
+            null
+        }
+    }
+
+    /** Opens the Android system share sheet for an exported PNG Uri. */
+    fun shareImage(ctx: Context, uri: Uri, title: String) {
+        try {
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "image/png"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            ctx.startActivity(Intent.createChooser(send, title))
+        } catch (_: Exception) {
         }
     }
 
@@ -75,27 +90,36 @@ object ReportImage {
         val specTitle: String,
         val specText: String?,
         val evidenceLines: List<String>,
+        val isEn: Boolean,
     )
 
-    fun exportPng(ctx: Context, ui: UiState, dualCell: Boolean, isDark: Boolean, out: OutputStream): Boolean {
+    fun exportPng(
+        ctx: Context,
+        ui: UiState,
+        dualCell: Boolean,
+        isDark: Boolean,
+        out: OutputStream,
+        isEn: Boolean = false,
+    ): Boolean {
         val a = ui.analysis ?: return false
         val s = ui.latest
+        fun t(zh: String, en: String) = if (isEn) en else zh
 
         val deviceStr = "${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE}"
         val modeStr = when (Prefs.privMode(ctx)) {
             1 -> "Root"
             2 -> "Shizuku"
-            else -> "公开 API"
-        } + if (dualCell) " · 双电芯" else ""
+            else -> t("公开 API", "Public API")
+        } + if (dualCell) t(" · 双电芯", " · Dual-Cell") else ""
 
         val basicRows = buildList<Pair<String, String>> {
-            add("设备" to deviceStr)
-            add("采集通道" to modeStr)
-            add("电量 / 状态" to "${s?.levelPct?.let { "$it%" } ?: "—"} · ${statusText(s?.status) ?: "—"}")
-            add("电池侧功率" to (fmt(ui.batteryPowerW, "W") ?: "—"))
-            add("输入侧功率" to (fmt(ui.inputPowerW, "W") ?: "—"))
+            add(t("设备", "Device") to deviceStr)
+            add(t("采集通道", "Channel") to modeStr)
+            add(t("电量 / 状态", "Level / Status") to "${s?.levelPct?.let { "$it%" } ?: "—"} · ${statusText(s?.status, isEn) ?: "—"}")
+            add(t("电池侧功率", "Battery Power") to (fmt(ui.batteryPowerW, "W") ?: "—"))
+            add(t("输入侧功率", "Input Power") to (fmt(ui.inputPowerW, "W") ?: "—"))
             add(
-                "电压 / 电流 / 温度" to (
+                t("电压 / 电流 / 温度", "Voltage / Current / Temp") to (
                     (fmt(s?.voltageMv?.let { it / 1000.0 }, "V") ?: "—") + " · " +
                         (fmt(ui.batteryCurrentMa, "mA", 0) ?: "—") + " · " +
                         (fmt(s?.tempDeci?.let { it / 10.0 }, "°C", 1) ?: "—")
@@ -108,58 +132,66 @@ object ReportImage {
             val cyc = s?.let { Analyzer.batteryCycleCount(it) }
             if (design != null || usable != null || calcH != null || soh != null || cyc != null) {
                 val healthStr = buildList {
-                    if (soh != null) add("系统 $soh%")
-                    if (calcH != null) add("估算 $calcH%")
+                    if (soh != null) add(t("系统 $soh%", "Driver $soh%"))
+                    if (calcH != null) add(t("估算 $calcH%", "Est. $calcH%"))
                     if (usable != null && design != null) add("$usable/$design mAh")
-                    if (cyc != null) add("${cyc}次循环")
+                    if (cyc != null) add(t("${cyc}次循环", "$cyc cycles"))
                 }.joinToString(" · ")
-                if (healthStr.isNotEmpty()) add("电池健康" to healthStr)
+                if (healthStr.isNotEmpty()) add(t("电池健康", "Battery Health") to healthStr)
             }
         }
 
         val spec = ReportSpec(
             timestampMs = System.currentTimeMillis(),
             statusKind = a.status,
-            statusLabel = a.status.label,
+            statusLabel = if (isEn) a.status.name else a.status.label,
             note = null,
             headline = a.headline,
-            leftTile = "驱动报告协议" to (a.driver ?: "未报告"),
-            rightTile = "预测当前协议" to (a.predicted ?: "无法预测"),
+            leftTile = t("驱动报告协议", "Driver Protocol") to (a.driver ?: t("未报告", "Not reported")),
+            rightTile = t("预测当前协议", "Predicted Protocol") to (a.predicted ?: t("无法预测", "Unavailable")),
             basicRows = basicRows,
             descLines = a.description.lines().filter { it.isNotBlank() },
-            specTitle = "协议规格参考（上限值）",
+            specTitle = t("协议规格参考（上限值）", "Protocol Spec Reference (Max)"),
             specText = a.protocolSpec,
             evidenceLines = a.evidence.sortedByDescending { it.level }.take(4).map { "L${it.level}  ${it.text}" },
+            isEn = isEn,
         )
         return renderPng(spec, isDark, out)
     }
 
-    fun exportArchivePng(entry: ArchiveEntry, isDark: Boolean, out: OutputStream): Boolean {
+    fun exportArchivePng(
+        entry: ArchiveEntry,
+        isDark: Boolean,
+        out: OutputStream,
+        isEn: Boolean = false,
+    ): Boolean {
+        fun t(zh: String, en: String) = if (isEn) en else zh
         val statusKind = Status.entries.firstOrNull { it.label == entry.status } ?: Status.UNKNOWN
         val basicRows = listOf(
-            "设备" to entry.device,
-            "记录电量" to (entry.levelPct?.let { "$it%" } ?: "—"),
-            "输入电压峰值" to (fmt(entry.maxVinV, "V", 1) ?: "—"),
+            t("设备", "Device") to entry.device,
+            t("记录电量", "Recorded Level") to (entry.levelPct?.let { "$it%" } ?: "—"),
+            t("输入电压峰值", "Peak Input Voltage") to (fmt(entry.maxVinV, "V", 1) ?: "—"),
         )
         val descLines = buildList {
             addAll(entry.description.lines().filter { it.isNotBlank() })
             if (entry.candidates.isNotEmpty()) {
-                add("候选协议：${entry.candidates.joinToString("；")}")
+                add(t("候选协议：", "Candidates: ") + entry.candidates.joinToString("；"))
             }
         }
         val spec = ReportSpec(
             timestampMs = entry.wallMs,
             statusKind = statusKind,
-            statusLabel = entry.status,
+            statusLabel = if (isEn) statusKind.name else entry.status,
             note = entry.note.trim().ifEmpty { null },
             headline = entry.headline,
-            leftTile = "输入功率峰值" to (fmt(entry.maxInputW, "W", 1) ?: "—"),
-            rightTile = "电池侧功率峰值" to (fmt(entry.maxBatteryW, "W", 1) ?: "—"),
+            leftTile = t("输入功率峰值", "Peak Input Power") to (fmt(entry.maxInputW, "W", 1) ?: "—"),
+            rightTile = t("电池侧功率峰值", "Peak Battery Power") to (fmt(entry.maxBatteryW, "W", 1) ?: "—"),
             basicRows = basicRows,
             descLines = descLines,
-            specTitle = "档位说明",
+            specTitle = t("档位说明", "Tier Specs"),
             specText = entry.specText.ifBlank { null },
             evidenceLines = entry.evidence.take(6),
+            isEn = isEn,
         )
         return renderPng(spec, isDark, out)
     }
@@ -319,12 +351,18 @@ object ReportImage {
             // Basic Info section
             canvas.drawLine(x0, y, xRight, y, paintStroke)
             y += 28f
-            canvas.drawText("基本信息", x0, y + 20f, pSection)
+            canvas.drawText(if (spec.isEn) "Basic Info" else "基本信息", x0, y + 20f, pSection)
             y += 40f
 
             val pValRight = textPaint(26f, textPrimary, bold = false).apply { textAlign = Paint.Align.RIGHT }
             for ((k, v) in spec.basicRows) {
                 canvas.drawText(k, x0, y + 26f, pLabel)
+                val maxValW = contentWidth - pLabel.measureText(k) - 28f
+                pValRight.textSize = 26f
+                val measured = pValRight.measureText(v)
+                if (measured > maxValW && maxValW > 120f) {
+                    pValRight.textSize = (26f * (maxValW / measured)).coerceAtLeast(18f)
+                }
                 canvas.drawText(v, xRight, y + 26f, pValRight)
                 y += 50f
             }
@@ -334,7 +372,7 @@ object ReportImage {
                 y += 10f
                 canvas.drawLine(x0, y, xRight, y, paintStroke)
                 y += 28f
-                canvas.drawText("分析摘要", x0, y + 20f, pSection)
+                canvas.drawText(if (spec.isEn) "Analysis Summary" else "分析摘要", x0, y + 20f, pSection)
                 y += 38f
                 for (dl in descLayouts) {
                     canvas.save()
@@ -364,7 +402,7 @@ object ReportImage {
                 y += 14f
                 canvas.drawLine(x0, y, xRight, y, paintStroke)
                 y += 28f
-                canvas.drawText("关键证据", x0, y + 20f, pSection)
+                canvas.drawText(if (spec.isEn) "Key Evidence" else "关键证据", x0, y + 20f, pSection)
                 y += 38f
                 for (el in evLayouts) {
                     canvas.save()
@@ -380,7 +418,11 @@ object ReportImage {
             canvas.drawLine(x0, y, xRight, y, paintStroke)
             y += 34f
             canvas.drawText(
-                "充了个电 v${BuildConfig.VERSION_NAME} · 本地离线生成 · 不含设备唯一标识",
+                if (spec.isEn) {
+                    "ChargeScope v${BuildConfig.VERSION_NAME} · Offline Local Report · No Device IDs"
+                } else {
+                    "充了个电 v${BuildConfig.VERSION_NAME} · 本地离线生成 · 不含设备唯一标识"
+                },
                 x0,
                 y,
                 pSmall,

@@ -46,6 +46,7 @@ data class AppPrefs(
     val oledBlack: Boolean = false,
     val dualCell: Boolean = false,
     val exportTreeUri: String? = null,
+    val privMode: Int = 0, // 0 = off, 1 = root, 2 = Shizuku
     val uiStyle: Int = 0, // 0 = Material 3, 1 = MIUIX
     val liquidGlassM3: Boolean = false,
     val liquidGlassMiuix: Boolean = false,
@@ -83,6 +84,7 @@ object AppSettings {
             oledBlack = Prefs.oledBlack(ctx),
             dualCell = Prefs.dualCell(ctx),
             exportTreeUri = Prefs.exportTreeUri(ctx),
+            privMode = Prefs.privMode(ctx),
             uiStyle = Prefs.uiStyle(ctx),
             liquidGlassM3 = Prefs.liquidGlassM3(ctx),
             liquidGlassMiuix = Prefs.liquidGlassMiuix(ctx),
@@ -140,6 +142,11 @@ object AppSettings {
     fun setExportTreeUri(ctx: Context, v: String?) {
         Prefs.setExportTreeUri(ctx, v)
         _prefs.value = _prefs.value.copy(exportTreeUri = v)
+    }
+
+    fun setPrivMode(ctx: Context, v: Int) {
+        Prefs.setPrivMode(ctx, v)
+        _prefs.value = _prefs.value.copy(privMode = v)
     }
 
     fun setUiStyle(ctx: Context, v: Int) {

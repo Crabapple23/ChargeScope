@@ -479,7 +479,7 @@ object Sampler {
     /** Called immediately when the user switches privileged mode; runs on Sampler's own scope. */
     fun onPrivModeChanged(ctx: Context, mode: Int) {
         val app = ctx.applicationContext
-        Prefs.setPrivMode(app, mode)
+        AppSettings.setPrivMode(app, mode)
         _probeMsg.value = null
         _state.value = _state.value.copy(rootError = null)
         bgScope.launch {
@@ -582,7 +582,7 @@ object Sampler {
             privError = r.error
             privRetryAt = now + 30_000L
             if (++privFails >= 3) {
-                Prefs.setPrivMode(app, 0)
+                AppSettings.setPrivMode(app, 0)
                 if (mode == 1) RootScanner.close() else ShizukuBridge.unbind(app)
                 lastMode = 0
                 privError = r.error + "（连续失败 3 次，已自动关闭特权增强）"

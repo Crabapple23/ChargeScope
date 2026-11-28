@@ -108,6 +108,7 @@ internal fun ProtocolTab() {
     val ui by Sampler.state.collectAsState()
     val prefs by AppSettings.prefs.collectAsState()
     val miuix = LocalIsMiuix.current
+    val isEn = LocalIsEn.current
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val a = ui.analysis
     if (a == null) {
@@ -124,7 +125,7 @@ internal fun ProtocolTab() {
                 val ok = withContext(Dispatchers.IO) {
                     try {
                         ctx.contentResolver.openOutputStream(uri)?.use { out ->
-                            ReportImage.exportPng(ctx, Sampler.state.value, prefs.dualCell, isDark, out)
+                            ReportImage.exportPng(ctx, Sampler.state.value, prefs.dualCell, isDark, out, isEn)
                         } ?: false
                     } catch (_: Exception) {
                         false
@@ -138,12 +139,12 @@ internal fun ProtocolTab() {
     val onLongPressExport: () -> Unit = {
         val fileName = "chargescope-report-${exportTimestamp()}.png"
         scope.launch {
-            val saved = withContext(Dispatchers.IO) {
+            val savedUri = withContext(Dispatchers.IO) {
                 ReportImage.saveToGallery(ctx, fileName) { out ->
-                    ReportImage.exportPng(ctx, Sampler.state.value, prefs.dualCell, isDark, out)
+                    ReportImage.exportPng(ctx, Sampler.state.value, prefs.dualCell, isDark, out, isEn)
                 }
             }
-            if (saved) {
+            if (savedUri != null) {
                 Toast.makeText(ctx, galleryOkToast, Toast.LENGTH_SHORT).show()
             } else {
                 exportImageLauncher.launch(fileName)

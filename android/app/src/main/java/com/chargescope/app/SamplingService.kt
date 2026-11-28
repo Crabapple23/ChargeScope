@@ -260,6 +260,13 @@ class SamplingService : Service() {
         return builder.build()
     }
 
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        AppLog.i("前台服务达到系统时长上限（Android 15 dataSync 限制），已自动停止")
+        stopRecording(t("后台服务时长已达系统上限，已自动停止记录", "System background limit reached; recording stopped"))
+        armed = false
+        stopSelf(startId)
+    }
+
     override fun onDestroy() {
         if (receiverOn) {
             try { unregisterReceiver(receiver) } catch (_: Exception) {}

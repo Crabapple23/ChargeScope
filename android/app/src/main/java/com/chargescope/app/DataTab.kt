@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -18,10 +19,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -32,8 +31,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -95,7 +99,8 @@ internal fun DataTab() {
     val rootError by remember { Sampler.state.map { it.rootError }.distinctUntilChanged() }.collectAsState(null)
     val recordedRows by remember { Sampler.state.map { it.recordedRows }.distinctUntilChanged() }.collectAsState(0L)
 
-    var mode by remember(rootError) { mutableStateOf(Prefs.privMode(ctx).toLong()) }
+    val prefs by AppSettings.prefs.collectAsState()
+    val mode = prefs.privMode.toLong()
     val shz by ShizukuBridge.stateFlow.collectAsState()
     val checking by Sampler.probing.collectAsState()
     val privMsg by Sampler.probeMsg.collectAsState()
@@ -115,6 +120,19 @@ internal fun DataTab() {
             rootProvider = RootScanner.detectProvider(ctx)
             ShizukuBridge.refreshState(ctx)
         }
+    }
+    DisposableEffect(ctx) {
+        val lifecycle = (ctx as? ComponentActivity)?.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val st = ShizukuBridge.refreshState(ctx)
+                if (AppSettings.prefs.value.privMode == 2 && st == ShizukuBridge.State.READY && Sampler.probeMsg.value == null) {
+                    Sampler.onShizukuAuthorized(ctx)
+                }
+            }
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
     }
     LaunchedEffect(recordedRows) {
         diskBytes = withContext(Dispatchers.IO) {
@@ -171,7 +189,6 @@ internal fun DataTab() {
         }
     }
 
-    val prefs by AppSettings.prefs.collectAsState()
     val isEn = LocalIsEn.current
     val intervalOpts = remember(isEn) {
         if (isEn) listOf("1s" to 1000L, "2s" to 2000L, "5s" to 5000L) else INTERVAL_OPTS
@@ -256,7 +273,6 @@ internal fun DataTab() {
         privSummary,
     ) {
         Chips(privOpts, mode) {
-            mode = it
             Sampler.onPrivModeChanged(ctx, it.toInt())
         }
         when (mode) {
