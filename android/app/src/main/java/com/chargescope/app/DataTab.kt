@@ -10,11 +10,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -208,7 +210,14 @@ internal fun DataTab() {
     }
     Fold(tr("自动记录", "Auto Record"), if (auto) tr("已开启", "On") else tr("已关闭", "Off")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(tr("连接充电器时自动开始，拔出后停止", "Auto-start on plug-in, stop on unplug"), Modifier.weight(1f))
+            Column(Modifier.weight(1f).padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(tr("连接充电器时自动记录", "Auto-Record While Charging"), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    tr("插入自动开始采样，拔出后自动停止", "Starts automatically on plug-in, stops on unplug"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             AppSwitch(checked = auto, onCheckedChange = {
                 if (it && Build.VERSION.SDK_INT >= 33 && !hasNotificationPermission(ctx)) {
                     autoNotifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -219,11 +228,35 @@ internal fun DataTab() {
                 }
             })
         }
-        Text(tr("开启后会常驻一条低优先级通知（空闲时不采样）。系统重启后需打开一次应用以恢复。", "Shows a low-priority notification while idle (no sampling). Open the app once after reboot to re-arm."), style = MaterialTheme.typography.bodySmall)
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    tr("• 空闲时仅常驻低优先级通知，不进行后台采样", "• Idle mode shows a low-priority notification with zero sampling"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    tr("• 手机重启后需打开一次应用以恢复自动监听", "• Open the app once after reboot to re-arm auto-listening"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
     Fold(tr("双电芯设备模式", "Dual-Cell Battery Mode"), if (prefs.dualCell) tr("已开启", "On") else tr("已关闭", "Off")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(tr("按 2S 串联双电芯算法计算功率与容量", "Use 2S dual-cell math for power & capacity"), Modifier.weight(1f))
+            Text(
+                tr("按 2S 串联双电芯算法计算功率与容量", "Use 2S dual-cell math for power & capacity"),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f).padding(end = 12.dp),
+            )
             AppSwitch(
                 checked = prefs.dualCell,
                 onCheckedChange = { Sampler.onDualCellChanged(ctx, it) },
@@ -425,63 +458,105 @@ internal fun DataTab() {
         )
     }
     Fold(tr("记录与日志", "Records & Logs"), tr("$recordedRows 行 · ${fmtBytes(diskBytes)}", "$recordedRows rows · ${fmtBytes(diskBytes)}")) {
-        Text(tr("已记录 $recordedRows 行，本机总占用约 ${fmtBytes(diskBytes)}（CSV 采用 GZIP 压缩存储，导出时自动解压）。应用无联网权限，导出不含设备标识。", "$recordedRows rows recorded, ~${fmtBytes(diskBytes)} on disk (GZIP compressed, auto-decompressed on export). Offline only."))
-        Button(
-            onClick = {
-                val tree = prefs.exportTreeUri
-                if (tree != null) {
-                    scope.launch {
-                        val name = "chargescope-${exportTimestamp()}.csv"
-                        val direct = withContext(Dispatchers.IO) {
-                            exportToAuthorizedTree(ctx, tree, "text/csv", name) { out -> Recorder.exportTo(ctx, out) }
-                        }
-                        if (direct != null) {
-                            msg = if (direct) "$csvOkMsg ($name)" else csvFailMsg
-                        } else {
-                            exportCsv.launch("chargescope.csv")
-                        }
-                    }
-                } else {
-                    exportCsv.launch("chargescope.csv")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(tr("已记录样本", "Recorded Rows"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(tr("$recordedRows 行", "$recordedRows rows"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(tr("导出 CSV 记录", "Export CSV")) }
-        Button(
-            onClick = {
-                val tree = prefs.exportTreeUri
-                if (tree != null) {
-                    scope.launch {
-                        val name = "chargescope-log-${exportTimestamp()}.txt"
-                        val direct = withContext(Dispatchers.IO) {
-                            exportToAuthorizedTree(ctx, tree, "text/plain", name) { out ->
-                                val text = Report.build(ctx, Sampler.state.value)
-                                out.write(text.toByteArray(Charsets.UTF_8))
-                                true
+            }
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(tr("本机总占用", "Local Storage"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(fmtBytes(diskBytes), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        Text(
+            tr(
+                "CSV 采用 GZIP 压缩存储，导出时自动解压；纯本地离线，导出不含设备标识。",
+                "CSV is GZIP-compressed on disk and auto-decompressed on export. Offline only, no device IDs.",
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    val tree = prefs.exportTreeUri
+                    if (tree != null) {
+                        scope.launch {
+                            val name = "chargescope-${exportTimestamp()}.csv"
+                            val direct = withContext(Dispatchers.IO) {
+                                exportToAuthorizedTree(ctx, tree, "text/csv", name) { out -> Recorder.exportTo(ctx, out) }
+                            }
+                            if (direct != null) {
+                                msg = if (direct) "$csvOkMsg ($name)" else csvFailMsg
+                            } else {
+                                exportCsv.launch("chargescope.csv")
                             }
                         }
-                        if (direct != null) {
-                            msg = if (direct) "$logOkMsg ($name)" else logFailMsg
-                        } else {
-                            exportLog.launch("chargescope-log.txt")
-                        }
+                    } else {
+                        exportCsv.launch("chargescope.csv")
                     }
-                } else {
-                    exportLog.launch("chargescope-log.txt")
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(tr("导出诊断日志", "Export Diagnostic Log")) }
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text(tr("导出 CSV", "Export CSV")) }
+            Button(
+                onClick = {
+                    val tree = prefs.exportTreeUri
+                    if (tree != null) {
+                        scope.launch {
+                            val name = "chargescope-log-${exportTimestamp()}.txt"
+                            val direct = withContext(Dispatchers.IO) {
+                                exportToAuthorizedTree(ctx, tree, "text/plain", name) { out ->
+                                    val text = Report.build(ctx, Sampler.state.value)
+                                    out.write(text.toByteArray(Charsets.UTF_8))
+                                    true
+                                }
+                            }
+                            if (direct != null) {
+                                msg = if (direct) "$logOkMsg ($name)" else logFailMsg
+                            } else {
+                                exportLog.launch("chargescope-log.txt")
+                            }
+                        }
+                    } else {
+                        exportLog.launch("chargescope-log.txt")
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text(tr("导出诊断日志", "Export Log")) }
+        }
         val treeUri = prefs.exportTreeUri
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                KV(
+                    tr("CSV / 日志目录", "CSV / Log Folder"),
+                    treeUri?.let(::formatExportTreeLabel) ?: tr("每次弹出选择器", "Ask every time"),
+                )
+                KV(
+                    tr("报告图片目录", "Report Images"),
+                    tr("相册 Pictures/ChargeScope", "Pictures/ChargeScope"),
+                )
+            }
+        }
         if (treeUri != null) {
-            Text(
-                tr(
-                    "CSV / 日志快捷目录：${formatExportTreeLabel(treeUri)}（报告图片默认存入相册 Pictures/ChargeScope）",
-                    "CSV / Log folder: ${formatExportTreeLabel(treeUri)} (report images save to Pictures/ChargeScope)",
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = { treeLauncher.launch(null) },
@@ -493,19 +568,12 @@ internal fun DataTab() {
                 ) { Text(tr("清除目录", "Clear Folder")) }
             }
         } else {
-            Text(
-                tr(
-                    "报告图片默认保存至相册 Pictures/ChargeScope；下方可为 CSV 与诊断日志设置快捷导出目录。",
-                    "Report images save to Pictures/ChargeScope. Optionally set a quick export folder for CSV & logs below.",
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             OutlinedButton(
                 onClick = { treeLauncher.launch(null) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(tr("设置快捷导出目录（CSV / 日志）", "Set Quick Export Folder (CSV / Log)")) }
         }
+        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
         val clearedMsg = tr("已清除记录和日志", "Records and logs cleared")
         OutlinedButton(
             onClick = {
@@ -516,6 +584,12 @@ internal fun DataTab() {
                 } else confirmClear = true
             },
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (confirmClear) tr("再次点击确认清除记录和日志", "Tap again to confirm clear") else tr("清除记录和日志", "Clear Records & Logs")) }
+        ) {
+            Text(
+                if (confirmClear) tr("再次点击确认清除记录和日志", "Tap again to confirm clear")
+                else tr("清除记录和日志", "Clear Records & Logs"),
+                color = if (confirmClear) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            )
+        }
     }
 }
