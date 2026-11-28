@@ -1,31 +1,275 @@
 package com.chargescope.app
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 
+@Composable
+private fun statusColors(status: Status): Pair<Color, Color> {
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    return when (status) {
+        Status.CONFIRMED -> {
+            val fg = if (isDark) Color(0xFF66BB6A) else Color(0xFF2E7D32)
+            fg to fg.copy(alpha = if (isDark) 0.18f else 0.12f)
+        }
+        Status.POSSIBLE -> {
+            val fg = if (isDark) Color(0xFFFFB74D) else Color(0xFFEF6C00)
+            fg to fg.copy(alpha = if (isDark) 0.18f else 0.12f)
+        }
+        Status.CONFLICT -> {
+            val fg = MaterialTheme.colorScheme.error
+            fg to fg.copy(alpha = if (isDark) 0.20f else 0.12f)
+        }
+        Status.UNKNOWN, Status.NOT_CHARGING -> {
+            val fg = MaterialTheme.colorScheme.onSurfaceVariant
+            fg to MaterialTheme.colorScheme.surfaceContainerHigh
+        }
+    }
+}
+
+@Composable
+private fun ProtocolContainer(content: @Composable () -> Unit) {
+    if (LocalIsMiuix.current) {
+        MiuixCard { content() }
+    } else {
+        Card(Modifier.fillMaxWidth()) { content() }
+    }
+}
+
+@Composable
+private fun ConclusionMetricTile(
+    label: String,
+    value: String,
+    highlighted: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = if (highlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = if (highlighted) BorderStroke(0.8.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)) else null,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (highlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ProtocolTab() {
     val ui by Sampler.state.collectAsState()
+    val miuix = LocalIsMiuix.current
     val a = ui.analysis
-    if (a == null) { Text(tr("等待首次采样…", "Waiting for first sample…")); return }
-    Section(tr("结论：${a.status.label}", "Conclusion: ${a.status.name}")) {
-        Text(a.headline, style = MaterialTheme.typography.titleSmall)
-        KV(tr("驱动报告协议", "Driver Protocol"), a.driver ?: tr("未报告", "None"))
-        KV(tr("预测当前协议", "Predicted Current Protocol"), a.predicted ?: tr("无法预测", "Unknown"))
-        a.protocolSpec?.let { spec ->
-            Text(tr("协议规格说明（参考上限，不代表当前实际功率）", "Protocol Spec (Reference ceiling, not live power)"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            Text(spec, style = MaterialTheme.typography.bodySmall)
+    if (a == null) {
+        Text(tr("等待首次采样…", "Waiting for first sample…"))
+        return
+    }
+
+    val (badgeFg, badgeBg) = statusColors(a.status)
+    val pad = if (miuix) 16.dp else 14.dp
+
+    // 1. Hero Conclusion Card
+    ProtocolContainer {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(pad),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    tr("协议识别结论", "Protocol Analysis"),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = badgeBg,
+                ) {
+                    Text(
+                        text = tr(a.status.label, a.status.name),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = badgeFg,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
+            }
+
+            Text(
+                text = a.headline,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ConclusionMetricTile(
+                    label = tr("驱动报告协议", "Driver Protocol"),
+                    value = a.driver ?: tr("未报告", "None"),
+                    highlighted = a.driver != null,
+                    modifier = Modifier.weight(1f),
+                )
+                ConclusionMetricTile(
+                    label = tr("预测当前协议", "Predicted Protocol"),
+                    value = a.predicted ?: tr("无法预测", "Unknown"),
+                    highlighted = a.driver == null && a.predicted != null,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            a.protocolSpec?.let { spec ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            tr("协议规格参考（上限值，不代表当前实际功率）", "Protocol Spec Reference (Ceiling, not live power)"),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = spec,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
         }
     }
+
+    // 2. Structured Summary Card (splits `驱动：` / `推测：` / `功率：` into tagged rows)
     if (a.description.isNotEmpty()) {
-        Section(tr("描述", "Summary")) { Text(a.description) }
+        val descLines = a.description.lines().filter { it.isNotBlank() }
+        Section(tr("分析摘要", "Analysis Summary")) {
+            descLines.forEachIndexed { idx, raw ->
+                val sep = raw.indexOf('：')
+                val tag = if (sep in 1..6) raw.substring(0, sep) else null
+                val body = if (tag != null) raw.substring(sep + 1).trim() else raw
+                if (idx > 0) {
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    if (tag != null) {
+                        val tagColor = when (tag) {
+                            "驱动" -> badgeFg
+                            "功率" -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 1.dp)
+                                .background(
+                                    color = tagColor.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(6.dp),
+                                )
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                        ) {
+                            Text(
+                                text = tag,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = tagColor,
+                            )
+                        }
+                    }
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
     }
+
+    // 3. Candidate Protocols as clean pill tags
     if (a.candidates.isNotEmpty()) {
-        Section(tr("候选协议（仅缩小范围，★ 为与本机品牌一致）", "Candidates (★ matches device brand)")) { a.candidates.forEach { Text("• $it") } }
+        Section(tr("候选协议（★ 与本机品牌一致）", "Candidates (★ matches device brand)")) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                a.candidates.forEach { c ->
+                    val brandMatch = c.startsWith("★")
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (brandMatch) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = if (brandMatch) BorderStroke(0.8.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)) else null,
+                    ) {
+                        Text(
+                            text = c,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = if (brandMatch) FontWeight.Medium else FontWeight.Normal,
+                            color = if (brandMatch) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
+
+    // 4. Collapsible reference & evidence sections
     if (a.candidateSpecs.isNotEmpty()) {
         Fold(
             tr("候选协议档位说明（参考上限）", "Candidate Tier Specs (Reference)"),
@@ -34,9 +278,12 @@ internal fun ProtocolTab() {
             a.candidateSpecs.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
         }
     }
-    Fold(tr("证据（L4 驱动 > L3 输入 > L2 功率 > L1 品牌）", "Evidence (L4 > L3 > L2 > L1)"), tr("${a.evidence.size} 条", "${a.evidence.size}")) {
+    Fold(
+        tr("证据（L4 驱动 > L3 输入 > L2 功率 > L1 品牌）", "Evidence (L4 > L3 > L2 > L1)"),
+        tr("${a.evidence.size} 条", "${a.evidence.size}"),
+    ) {
         if (a.evidence.isEmpty()) Text(tr("暂无证据", "No evidence")) else a.evidence.sortedByDescending { it.level }.forEach {
-            Text("L${it.level}  ${it.text}")
+            Text("L${it.level}  ${it.text}", style = MaterialTheme.typography.bodySmall)
         }
     }
     if (a.limitations.isNotEmpty()) {
