@@ -17,13 +17,17 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -34,6 +38,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
+import top.yukonga.miuix.kmp.extra.SuperDialog as MiuixSuperDialog
+import top.yukonga.miuix.kmp.theme.MiuixTheme as LibMiuixTheme
+import top.yukonga.miuix.kmp.utils.MiuixPopupUtils.Companion.MiuixPopupHost
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -205,16 +213,18 @@ private fun App() {
         Density(baseDensity.density, baseDensity.fontScale * prefs.fontMultiplier)
     }
 
+    val miuixColors = if (prefs.isMiuixFull) {
+        miuixLibColors(dark = dark, dynamicColor = prefs.dynamicColor, oledBlack = prefs.oledBlack)
+    } else null
+
     CompositionLocalProvider(
         LocalDensity provides scaledDensity,
         LocalIsEn provides prefs.isEn,
         LocalIsMiuix provides prefs.isMiuix,
+        LocalIsMiuixFull provides prefs.isMiuixFull,
         LocalBottomBarExtra provides (if (prefs.liquidGlassBar) 88.dp else 0.dp),
     ) {
-        MaterialTheme(
-            colorScheme = colors,
-            shapes = if (prefs.isMiuix) MiuixShapes else MaterialTheme.shapes,
-        ) {
+        val appBody: @Composable () -> Unit = {
             BackHandler(enabled = showOnboarding) {
                 // Prevent accidental dismissal of the first-launch guide via back gesture.
             }
@@ -260,6 +270,24 @@ private fun App() {
                             drawLayer(backdropLayer)
                         } else {
                             drawContent()
+                        }
+                    },
+                    topBar = {
+                        if (prefs.isMiuixFull) {
+                            val currentTab = TABS.getOrElse(tab) { TABS[0] }
+                            MiuixSmallTopAppBar(
+                                title = tr(currentTab.zh, currentTab.en),
+                                actions = {
+                                    if (tab == 4) {
+                                        IconButton(onClick = { showSettings = true }) {
+                                            Icon(
+                                                painter = painterResource(R.drawable.ic_settings),
+                                                contentDescription = tr("软件设置", "App Settings"),
+                                            )
+                                        }
+                                    }
+                                },
+                            )
                         }
                     },
                     bottomBar = {
@@ -372,7 +400,43 @@ private fun App() {
                         },
                     )
                 }
-                if (!showOnboarding && !prefs.dualCell && !dualCellPrompted && dualCellReason != null) {
+                val showDualPrompt = !showOnboarding && !prefs.dualCell && !dualCellPrompted && dualCellReason != null
+                if (prefs.isMiuixFull) {
+                    val dualShowState = remember { mutableStateOf(false) }
+                    dualShowState.value = showDualPrompt
+                    MiuixSuperDialog(
+                        show = dualShowState,
+                        title = tr("检测到可能为双电芯设备", "Possible Dual-Cell Device"),
+                        summary = (dualCellReason ?: "") + "\n\n" + tr(
+                            "是否切换为双电芯算法计算功率与容量？（后续可随时在「数据 → 双电芯设备模式」中修改）",
+                            "Switch to dual-cell math for power & capacity? (You can change this anytime under Data → Dual-Cell Battery Mode)",
+                        ),
+                        onDismissRequest = {
+                            dualCellPrompted = true
+                            Prefs.setDualCellPrompted(ctx, true)
+                        },
+                    ) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            AppSecondaryButton(
+                                text = tr("保持单电芯", "Single-Cell"),
+                                onClick = {
+                                    dualCellPrompted = true
+                                    Prefs.setDualCellPrompted(ctx, true)
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                            AppButton(
+                                text = tr("使用双电芯", "Dual-Cell"),
+                                onClick = {
+                                    dualCellPrompted = true
+                                    Sampler.onDualCellChanged(ctx, true)
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                    MiuixPopupHost()
+                } else if (showDualPrompt) {
                     AlertDialog(
                         onDismissRequest = {
                             dualCellPrompted = true
@@ -401,6 +465,18 @@ private fun App() {
                         },
                     )
                 }
+            }
+        }
+        MaterialTheme(
+            colorScheme = colors,
+            shapes = if (prefs.isMiuix) MiuixShapes else MaterialTheme.shapes,
+        ) {
+            if (miuixColors != null) {
+                LibMiuixTheme(colors = miuixColors) {
+                    appBody()
+                }
+            } else {
+                appBody()
             }
         }
     }

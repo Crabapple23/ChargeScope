@@ -163,7 +163,9 @@ internal fun RealtimeTab() {
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         SamplingService.send(ctx, null)
     }
-    Button(
+    AppButton(
+        text = if (ui.recording) tr("停止记录（已写入 ${ui.recordedRows} 行）", "Stop Recording (${ui.recordedRows} rows)")
+        else tr("开始后台记录", "Start Background Recording"),
         onClick = {
             if (ui.recording) {
                 SamplingService.send(ctx, SamplingService.ACTION_STOP_REC)
@@ -174,12 +176,7 @@ internal fun RealtimeTab() {
             }
         },
         modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(
-            if (ui.recording) tr("停止记录（已写入 ${ui.recordedRows} 行）", "Stop Recording (${ui.recordedRows} rows)")
-            else tr("开始后台记录", "Start Background Recording"),
-        )
-    }
+    )
 }
 
 private fun niceMax(v: Float): Float {

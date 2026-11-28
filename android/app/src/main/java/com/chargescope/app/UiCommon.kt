@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,9 +24,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -43,6 +47,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
+import top.yukonga.miuix.kmp.basic.SmallTitle as MiuixSmallTitle
+import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import top.yukonga.miuix.kmp.basic.TextField as MiuixTextField
+import top.yukonga.miuix.kmp.theme.MiuixTheme as LibMiuixTheme
+import top.yukonga.miuix.kmp.utils.SmoothRoundedCornerShape
 
 val LocalBottomBarExtra = compositionLocalOf { 0.dp }
 
@@ -66,7 +76,19 @@ internal fun ScrollBody(content: @Composable () -> Unit) {
 
 @Composable
 internal fun Section(title: String, content: @Composable () -> Unit) {
-    if (LocalIsMiuix.current) {
+    if (LocalIsMiuixFull.current) {
+        Column(Modifier.fillMaxWidth()) {
+            MiuixSmallTitle(
+                text = title,
+                insideMargin = PaddingValues(start = 12.dp, top = 4.dp, bottom = 6.dp),
+            )
+            MiuixCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    content()
+                }
+            }
+        }
+    } else if (LocalIsMiuix.current) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 title,
@@ -87,6 +109,83 @@ internal fun Section(title: String, content: @Composable () -> Unit) {
                 content()
             }
         }
+    }
+}
+
+@Composable
+internal fun AppButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    if (LocalIsMiuixFull.current) {
+        MiuixTextButton(
+            text = text,
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            colors = MiuixButtonDefaults.textButtonColorsPrimary(),
+        )
+    } else {
+        Button(onClick = onClick, modifier = modifier, enabled = enabled) {
+            Text(text)
+        }
+    }
+}
+
+@Composable
+internal fun AppSecondaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    danger: Boolean = false,
+) {
+    if (LocalIsMiuixFull.current) {
+        MiuixTextButton(
+            text = text,
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            colors = MiuixButtonDefaults.textButtonColors(
+                textColor = if (danger) MaterialTheme.colorScheme.error else LibMiuixTheme.colorScheme.onSecondaryVariant,
+            ),
+        )
+    } else {
+        OutlinedButton(onClick = onClick, modifier = modifier, enabled = enabled) {
+            Text(text, color = if (danger) MaterialTheme.colorScheme.error else Color.Unspecified)
+        }
+    }
+}
+
+@Composable
+internal fun AppTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String = "",
+    modifier: Modifier = Modifier,
+) {
+    if (LocalIsMiuixFull.current) {
+        MiuixTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = if (placeholder.isNotEmpty() && value.isEmpty()) placeholder else label,
+            modifier = modifier,
+        )
+    } else {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text(label) },
+            placeholder = if (placeholder.isNotEmpty()) {
+                { Text(placeholder) }
+            } else null,
+            singleLine = false,
+            maxLines = 4,
+            modifier = modifier,
+        )
     }
 }
 
@@ -149,12 +248,13 @@ internal fun <T> OptionChips(options: List<Pair<String, T>>, selected: T, onSele
                     animationSpec = tween(160),
                     label = "miuixChipFg",
                 )
+                val chipShape = remember { SmoothRoundedCornerShape(12.dp) }
                 Surface(
-                    shape = RoundedCornerShape(50),
+                    shape = chipShape,
                     color = bg,
                     border = BorderStroke(1.dp, border),
                     modifier = Modifier
-                        .clip(RoundedCornerShape(50))
+                        .clip(chipShape)
                         .clickable { onSelect(v) },
                 ) {
                     Text(
@@ -178,8 +278,9 @@ internal fun UiStyleSelector(selected: Int, onSelect: (Int) -> Unit) {
     val outerShape = RoundedCornerShape(if (miuix) 16.dp else 14.dp)
     val innerShape = RoundedCornerShape(if (miuix) 12.dp else 10.dp)
     val items = listOf(
-        Triple(0, "Material 3", tr("默认风格", "Default")),
-        Triple(1, "MIUIX", tr("HyperOS 风格", "HyperOS")),
+        Triple(0, "Material 3", tr("默认", "Default")),
+        Triple(1, tr("MIUIX 轻享", "MIUIX Lite"), tr("原风味", "Lite")),
+        Triple(2, tr("MIUIX 完整", "MIUIX Full"), tr("原生组件", "Full Lib")),
     )
     Surface(
         modifier = Modifier.fillMaxWidth(),

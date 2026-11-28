@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.extra.SuperDialog as MiuixSuperDialog
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -305,26 +306,31 @@ internal fun ArchiveTab() {
         }
     }
 
-    editing?.let { target ->
-        AlertDialog(
+    val miuix = LocalIsMiuix.current
+    val miuixFull = LocalIsMiuixFull.current
+    if (miuixFull) {
+        val showEdit = remember { mutableStateOf(false) }
+        showEdit.value = editing != null
+        MiuixSuperDialog(
+            show = showEdit,
+            title = tr("管理存档", "Manage Archive"),
             onDismissRequest = {
                 editing = null
                 confirmDeleteOne = false
             },
-            title = { Text(tr("管理存档", "Manage Archive")) },
-            text = {
+        ) {
+            editing?.let { target ->
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
+                    AppTextField(
                         value = draft,
                         onValueChange = { draft = it },
-                        label = { Text(tr("备注（优先显示）", "Note (shown first)")) },
-                        placeholder = { Text(tr("例如：原装 120W 头 + 6A 线", "e.g., OEM 120W brick + 6A cable")) },
-                        singleLine = false,
-                        maxLines = 4,
+                        label = tr("备注（优先显示）", "Note (shown first)"),
+                        placeholder = tr("例如：原装 120W 头 + 6A 线", "e.g., OEM 120W brick + 6A cable"),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
+                        AppSecondaryButton(
+                            text = tr("保存图片", "Save Image"),
                             onClick = {
                                 val snapshot = target.copy(note = draft.trim())
                                 editing = null
@@ -332,10 +338,9 @@ internal fun ArchiveTab() {
                                 startExportImage(snapshot, false)
                             },
                             modifier = Modifier.weight(1f),
-                        ) {
-                            Text(tr("保存图片", "Save Image"))
-                        }
-                        Button(
+                        )
+                        AppButton(
+                            text = tr("保存并分享", "Save & Share"),
                             onClick = {
                                 val snapshot = target.copy(note = draft.trim())
                                 editing = null
@@ -343,11 +348,11 @@ internal fun ArchiveTab() {
                                 startExportImage(snapshot, true)
                             },
                             modifier = Modifier.weight(1f),
-                        ) {
-                            Text(tr("保存并分享", "Save & Share"))
-                        }
+                        )
                     }
-                    OutlinedButton(
+                    AppSecondaryButton(
+                        text = if (confirmDeleteOne) tr("再次点击确认删除此存档", "Tap again to confirm delete")
+                        else tr("删除此存档", "Delete This Entry"),
                         onClick = {
                             if (confirmDeleteOne) {
                                 if (Archive.delete(target.wallMs)) {
@@ -360,33 +365,114 @@ internal fun ArchiveTab() {
                                 confirmDeleteOne = true
                             }
                         },
+                        danger = true,
                         modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            if (confirmDeleteOne) tr("再次点击确认删除此存档", "Tap again to confirm delete")
-                            else tr("删除此存档", "Delete This Entry"),
-                            color = MaterialTheme.colorScheme.error,
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AppSecondaryButton(
+                            text = tr("取消", "Cancel"),
+                            onClick = {
+                                editing = null
+                                confirmDeleteOne = false
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                        AppButton(
+                            text = tr("保存备注", "Save Note"),
+                            onClick = {
+                                Archive.updateNote(target.wallMs, draft)
+                                editing = null
+                                confirmDeleteOne = false
+                            },
+                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    Archive.updateNote(target.wallMs, draft)
+            }
+        }
+    } else {
+        editing?.let { target ->
+            AlertDialog(
+                onDismissRequest = {
                     editing = null
                     confirmDeleteOne = false
-                }) { Text(tr("保存", "Save")) }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    editing = null
-                    confirmDeleteOne = false
-                }) { Text(tr("取消", "Cancel")) }
-            },
-        )
+                },
+                title = { Text(tr("管理存档", "Manage Archive")) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = draft,
+                            onValueChange = { draft = it },
+                            label = { Text(tr("备注（优先显示）", "Note (shown first)")) },
+                            placeholder = { Text(tr("例如：原装 120W 头 + 6A 线", "e.g., OEM 120W brick + 6A cable")) },
+                            singleLine = false,
+                            maxLines = 4,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    val snapshot = target.copy(note = draft.trim())
+                                    editing = null
+                                    confirmDeleteOne = false
+                                    startExportImage(snapshot, false)
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(tr("保存图片", "Save Image"))
+                            }
+                            Button(
+                                onClick = {
+                                    val snapshot = target.copy(note = draft.trim())
+                                    editing = null
+                                    confirmDeleteOne = false
+                                    startExportImage(snapshot, true)
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(tr("保存并分享", "Save & Share"))
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                if (confirmDeleteOne) {
+                                    if (Archive.delete(target.wallMs)) {
+                                        AppLog.i("已删除一条识别存档")
+                                        Toast.makeText(ctx, deletedToast, Toast.LENGTH_SHORT).show()
+                                    }
+                                    editing = null
+                                    confirmDeleteOne = false
+                                } else {
+                                    confirmDeleteOne = true
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                if (confirmDeleteOne) tr("再次点击确认删除此存档", "Tap again to confirm delete")
+                                else tr("删除此存档", "Delete This Entry"),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        Archive.updateNote(target.wallMs, draft)
+                        editing = null
+                        confirmDeleteOne = false
+                    }) { Text(tr("保存", "Save")) }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        editing = null
+                        confirmDeleteOne = false
+                    }) { Text(tr("取消", "Cancel")) }
+                },
+            )
+        }
     }
 
-    val miuix = LocalIsMiuix.current
     val extraBottom = LocalBottomBarExtra.current
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -407,19 +493,22 @@ internal fun ArchiveTab() {
                     ),
                     style = MaterialTheme.typography.bodySmall,
                 )
-                OutlinedButton(
+                AppSecondaryButton(
+                    text = if (confirm) tr("再次点击确认清除全部存档", "Tap again to clear all") else tr("清除存档", "Clear Archive"),
                     onClick = {
                         if (confirm) { Archive.clear(); AppLog.i("已清除识别存档"); confirm = false } else confirm = true
                     },
+                    danger = confirm,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (confirm) tr("再次点击确认清除全部存档", "Tap again to clear all") else tr("清除存档", "Clear Archive")) }
-                Button(
+                )
+                AppButton(
+                    text = tr("增加当前为存档", "Save Current as Archive"),
                     onClick = {
                         val ok = Sampler.archiveNow(ctx)
                         Toast.makeText(ctx, if (ok) archivedToast else noDataToast, Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(tr("增加当前为存档", "Save Current as Archive")) }
+                )
             }
         }
         if (reversed.isEmpty()) {

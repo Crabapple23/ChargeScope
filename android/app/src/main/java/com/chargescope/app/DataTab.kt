@@ -356,11 +356,12 @@ internal fun DataTab() {
                         )
                     }
                 }
-                Button(
+                AppButton(
+                    text = if (checking) tr("正在检测连接…", "Testing…") else tr("申请并检测 Root 连接", "Request & Test Root"),
                     enabled = !checking,
                     onClick = { Sampler.startProbe(ctx, 1) },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (checking) tr("正在检测连接…", "Testing…") else tr("申请并检测 Root 连接", "Request & Test Root")) }
+                )
                 Text(
                     tr(
                         "支持 Magisk / KernelSU / APatch，仅执行固定只读探测。授权弹窗点允许后若未自动刷新，请再点一次检测连接。",
@@ -401,26 +402,29 @@ internal fun DataTab() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (shz == ShizukuBridge.State.READY) {
-                    Button(
+                    AppButton(
+                        text = if (checking) tr("正在检测连接…", "Testing…") else tr("检测连接", "Test Connection"),
                         enabled = !checking,
                         onClick = { Sampler.startProbe(ctx, 2) },
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text(if (checking) tr("正在检测连接…", "Testing…") else tr("检测连接", "Test Connection")) }
+                    )
                 } else {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Button(
+                        AppButton(
+                            text = tr("申请授权", "Authorize"),
                             enabled = !checking && shz == ShizukuBridge.State.NO_PERMISSION,
                             onClick = { ShizukuBridge.requestPermission(ctx) },
                             modifier = Modifier.weight(1f),
-                        ) { Text(tr("申请授权", "Authorize")) }
-                        OutlinedButton(
+                        )
+                        AppSecondaryButton(
+                            text = if (checking) tr("检测中…", "Probing…") else tr("检测连接", "Test"),
                             enabled = !checking,
                             onClick = { Sampler.startProbe(ctx, 2) },
                             modifier = Modifier.weight(1f),
-                        ) { Text(if (checking) tr("检测中…", "Probing…") else tr("检测连接", "Test")) }
+                        )
                     }
                 }
                 Text(
@@ -505,7 +509,8 @@ internal fun DataTab() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
+            AppButton(
+                text = tr("导出 CSV", "Export CSV"),
                 onClick = {
                     val tree = prefs.exportTreeUri
                     if (tree != null) {
@@ -525,8 +530,9 @@ internal fun DataTab() {
                     }
                 },
                 modifier = Modifier.weight(1f),
-            ) { Text(tr("导出 CSV", "Export CSV")) }
-            Button(
+            )
+            AppButton(
+                text = tr("导出诊断日志", "Export Log"),
                 onClick = {
                     val tree = prefs.exportTreeUri
                     if (tree != null) {
@@ -550,7 +556,7 @@ internal fun DataTab() {
                     }
                 },
                 modifier = Modifier.weight(1f),
-            ) { Text(tr("导出诊断日志", "Export Log")) }
+            )
         }
         val treeUri = prefs.exportTreeUri
         Surface(
@@ -574,24 +580,29 @@ internal fun DataTab() {
         }
         if (treeUri != null) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
+                AppSecondaryButton(
+                    text = tr("更换目录", "Change Folder"),
                     onClick = { treeLauncher.launch(null) },
                     modifier = Modifier.weight(1f),
-                ) { Text(tr("更换目录", "Change Folder")) }
-                OutlinedButton(
+                )
+                AppSecondaryButton(
+                    text = tr("清除目录", "Clear Folder"),
                     onClick = { AppSettings.setExportTreeUri(ctx, null) },
                     modifier = Modifier.weight(1f),
-                ) { Text(tr("清除目录", "Clear Folder")) }
+                )
             }
         } else {
-            OutlinedButton(
+            AppSecondaryButton(
+                text = tr("设置快捷导出目录（CSV / 日志）", "Set Quick Export Folder (CSV / Log)"),
                 onClick = { treeLauncher.launch(null) },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(tr("设置快捷导出目录（CSV / 日志）", "Set Quick Export Folder (CSV / Log)")) }
+            )
         }
         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
         val clearedMsg = tr("已清除记录和日志", "Records and logs cleared")
-        OutlinedButton(
+        AppSecondaryButton(
+            text = if (confirmClear) tr("再次点击确认清除记录和日志", "Tap again to confirm clear")
+            else tr("清除记录和日志", "Clear Records & Logs"),
             onClick = {
                 if (confirmClear) {
                     Recorder.clear(ctx); AppLog.clear()
@@ -599,13 +610,8 @@ internal fun DataTab() {
                     msg = clearedMsg; confirmClear = false
                 } else confirmClear = true
             },
+            danger = confirmClear,
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                if (confirmClear) tr("再次点击确认清除记录和日志", "Tap again to confirm clear")
-                else tr("清除记录和日志", "Clear Records & Logs"),
-                color = if (confirmClear) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-            )
-        }
+        )
     }
 }

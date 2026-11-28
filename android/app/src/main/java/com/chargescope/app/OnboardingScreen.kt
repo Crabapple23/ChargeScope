@@ -298,27 +298,23 @@ fun OnboardingScreen(onFinish: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (step > 0) {
-                    OutlinedButton(
+                    AppSecondaryButton(
+                        text = tr("上一步", "Back"),
                         onClick = { step-- },
                         modifier = Modifier.weight(1f),
-                    ) {
-                        Text(tr("上一步", "Back"))
-                    }
+                    )
                 }
-                Button(
+                AppButton(
+                    text = when (step) {
+                        0 -> tr("同意并继续", "Agree & Continue")
+                        totalSteps - 1 -> tr("完成并进入", "Get Started")
+                        else -> tr("下一步", "Next")
+                    },
                     onClick = {
                         if (step < totalSteps - 1) step++ else onFinish()
                     },
                     modifier = Modifier.weight(if (step > 0) 1.4f else 1f),
-                ) {
-                    Text(
-                        when (step) {
-                            0 -> tr("同意并继续", "Agree & Continue")
-                            totalSteps - 1 -> tr("完成并进入", "Get Started")
-                            else -> tr("下一步", "Next")
-                        },
-                    )
-                }
+                )
             }
         }
     }
@@ -498,13 +494,17 @@ private fun StepBasicPermissions(
         )
         if (needsNotifPerm && !notifGranted) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onRequestNotif, modifier = Modifier.weight(1f)) {
-                    Text(tr("申请通知权限", "Grant"))
-                }
+                AppButton(
+                    text = tr("申请通知权限", "Grant"),
+                    onClick = onRequestNotif,
+                    modifier = Modifier.weight(1f),
+                )
                 if (notifAsked) {
-                    OutlinedButton(onClick = onOpenNotifSettings, modifier = Modifier.weight(1f)) {
-                        Text(tr("系统设置", "Settings"))
-                    }
+                    AppSecondaryButton(
+                        text = tr("系统设置", "Settings"),
+                        onClick = onOpenNotifSettings,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
@@ -543,16 +543,18 @@ private fun StepBasicPermissions(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (isScopedStorage) {
-            OutlinedButton(onClick = onPickTree, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    if (exportTreeUri != null) tr("更换快捷导出目录（可选）", "Change Export Folder (Optional)")
-                    else tr("授权快捷导出目录（可选）", "Pick Quick Export Folder (Optional)"),
-                )
-            }
+            AppSecondaryButton(
+                text = if (exportTreeUri != null) tr("更换快捷导出目录（可选）", "Change Export Folder (Optional)")
+                else tr("授权快捷导出目录（可选）", "Pick Quick Export Folder (Optional)"),
+                onClick = onPickTree,
+                modifier = Modifier.fillMaxWidth(),
+            )
         } else if (!legacyStorageGranted) {
-            Button(onClick = onRequestLegacyStorage, modifier = Modifier.fillMaxWidth()) {
-                Text(tr("申请存储权限", "Grant Storage Permission"))
-            }
+            AppButton(
+                text = tr("申请存储权限", "Grant Storage Permission"),
+                onClick = onRequestLegacyStorage,
+                modifier = Modifier.fillMaxWidth(),
+            )
             if (storageAsked) {
                 Text(
                     tr("若被拒绝，也可稍后在导出时通过系统文件选择器保存。", "If denied, you can still save via the system file picker."),
@@ -633,23 +635,26 @@ private fun StepPrivileged(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (shzState == ShizukuBridge.State.READY) {
-                    Button(
+                    AppButton(
+                        text = if (checking) tr("正在检测连接…", "Testing…") else tr("检测连接", "Test Connection"),
                         enabled = !checking,
                         onClick = onProbeShizuku,
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text(if (checking) tr("正在检测连接…", "Testing…") else tr("检测连接", "Test Connection")) }
+                    )
                 } else {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
+                        AppButton(
+                            text = tr("申请授权", "Authorize"),
                             enabled = !checking && shzState == ShizukuBridge.State.NO_PERMISSION,
                             onClick = onRequestShizuku,
                             modifier = Modifier.weight(1f),
-                        ) { Text(tr("申请授权", "Authorize")) }
-                        OutlinedButton(
+                        )
+                        AppSecondaryButton(
+                            text = if (checking) tr("检测中…", "Probing…") else tr("检测连接", "Test"),
                             enabled = !checking,
                             onClick = onProbeShizuku,
                             modifier = Modifier.weight(1f),
-                        ) { Text(if (checking) tr("检测中…", "Probing…") else tr("检测连接", "Test")) }
+                        )
                     }
                 }
                 Text(
@@ -673,16 +678,13 @@ private fun StepPrivileged(
                         positive = rootProvider != null,
                     )
                 }
-                Button(
+                AppButton(
+                    text = if (checking) tr("正在检测 Root…", "Probing Root…")
+                    else tr("申请并检测 Root 连接", "Request & Test Root"),
                     enabled = !checking,
                     onClick = onProbeRoot,
                     modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        if (checking) tr("正在检测 Root…", "Probing Root…")
-                        else tr("申请并检测 Root 连接", "Request & Test Root"),
-                    )
-                }
+                )
                 Text(
                     tr(
                         "提示：首次授权弹出 Root 提示后请点允许；若超时未自动刷新，请再次点击检测连接。",
@@ -768,7 +770,14 @@ private fun StepBatteryAndFinish(
 
     StepCard {
         Text(tr("当前配置一览", "Setup Summary"), style = MaterialTheme.typography.titleMedium)
-        KV(tr("界面风格", "UI Style"), if (uiStyle == 1) "MIUIX (HyperOS)" else "Material 3")
+        KV(
+            tr("界面风格", "UI Style"),
+            when (uiStyle) {
+                2 -> tr("MIUIX 完整（原生组件）", "MIUIX Full")
+                1 -> tr("MIUIX 轻享（原风味）", "MIUIX Lite")
+                else -> "Material 3"
+            },
+        )
         KV(tr("通知权限", "Notifications"), if (notifGranted) tr("已就绪", "Ready") else tr("按需申请", "On Demand"))
         KV(
             tr("特权通道", "Privileged Mode"),

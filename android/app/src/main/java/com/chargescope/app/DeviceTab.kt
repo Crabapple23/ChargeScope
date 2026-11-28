@@ -87,17 +87,19 @@ internal fun DeviceTab(onOpenSettings: () -> Unit) {
             else -> null
         }
     }
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(tr("设备", "Device"), style = MaterialTheme.typography.titleLarge)
-        IconButton(onClick = onOpenSettings) {
-            Icon(
-                painter = painterResource(R.drawable.ic_settings),
-                contentDescription = tr("软件设置", "App Settings"),
-            )
+    if (!LocalIsMiuixFull.current) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(tr("设备", "Device"), style = MaterialTheme.typography.titleLarge)
+            IconButton(onClick = onOpenSettings) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_settings),
+                    contentDescription = tr("软件设置", "App Settings"),
+                )
+            }
         }
     }
     Section(tr("设备信息", "Device Info")) {
@@ -130,13 +132,12 @@ internal fun DeviceTab(onOpenSettings: () -> Unit) {
                 tr("${nodes.size} 个节点 · $totalProps 项属性", "${nodes.size} nodes · $totalProps fields"),
             )
         }
-        OutlinedButton(
+        AppSecondaryButton(
+            text = if (deepScanning) tr("深度扫描中…", "Deep Scanning…") else tr("一键深度扫描（全量充电节点）", "Deep Scan All Charging Nodes"),
             enabled = !deepScanning,
             onClick = { Sampler.startDeepScan(ctx) },
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(if (deepScanning) tr("深度扫描中…", "Deep Scanning…") else tr("一键深度扫描（全量充电节点）", "Deep Scan All Charging Nodes"))
-        }
+        )
         Text(
             tr(
                 "扫描本机可读的 power_supply / Type-C / 厂商快充节点，以及 Health / USB / batterystats / 充电属性，结果会自动附带在“导出诊断日志”中。",

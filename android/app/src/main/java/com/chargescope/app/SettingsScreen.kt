@@ -8,6 +8,7 @@ import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,14 +16,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.SmallTitle as MiuixSmallTitle
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
@@ -47,12 +48,13 @@ data class AppPrefs(
     val dualCell: Boolean = false,
     val exportTreeUri: String? = null,
     val privMode: Int = 0, // 0 = off, 1 = root, 2 = Shizuku
-    val uiStyle: Int = 0, // 0 = Material 3, 1 = MIUIX
+    val uiStyle: Int = 0, // 0 = Material 3, 1 = MIUIX Lite, 2 = MIUIX Full
     val liquidGlassM3: Boolean = false,
     val liquidGlassMiuix: Boolean = false,
 ) {
     val isEn: Boolean get() = lang == "en"
-    val isMiuix: Boolean get() = uiStyle == 1
+    val isMiuix: Boolean get() = uiStyle >= 1
+    val isMiuixFull: Boolean get() = uiStyle == 2
     val liquidGlassBar: Boolean get() = if (isMiuix) liquidGlassMiuix else liquidGlassM3
     val fontMultiplier: Float
         get() = when (fontTier) {
@@ -192,24 +194,38 @@ fun SettingsScreen(
 
     Scaffold(
         topBar = {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 4.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_back),
-                        contentDescription = tr("返回", "Back"),
+            if (LocalIsMiuixFull.current) {
+                MiuixSmallTopAppBar(
+                    title = tr("软件设置", "App Settings"),
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_back),
+                                contentDescription = tr("返回", "Back"),
+                            )
+                        }
+                    },
+                )
+            } else {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_back),
+                            contentDescription = tr("返回", "Back"),
+                        )
+                    }
+                    Text(
+                        tr("软件设置", "App Settings"),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(start = 4.dp),
                     )
                 }
-                Text(
-                    tr("软件设置", "App Settings"),
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(start = 4.dp),
-                )
             }
         },
     ) { pad ->
@@ -228,8 +244,8 @@ fun SettingsScreen(
                 )
                 Text(
                     tr(
-                        "即时生效，不影响任何采集与协议分析功能。MIUIX 风格采用 HyperOS 卡片分层、弹簧动效与精简底栏。",
-                        "Takes effect immediately without affecting any features. MIUIX brings HyperOS-style layered cards, spring motion, and a sleek bottom bar.",
+                        "即时生效，不影响采集与协议分析：MIUIX 轻享保留原轻量卡片风味，MIUIX 完整启用开源 miuix 原生组件库（大圆角按钮、顶栏、HyperOS 弹窗与输入框）。",
+                        "Takes effect immediately: MIUIX Lite keeps the lightweight card flavor; MIUIX Full enables the full miuix component library (buttons, top bar, dialogs, and text fields).",
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -281,7 +297,8 @@ fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            OutlinedButton(
+                            AppSecondaryButton(
+                                text = tr("深色开始 ${fmtClockMin(prefs.darkStartMin)}", "Dark ${fmtClockMin(prefs.darkStartMin)}"),
                                 onClick = {
                                     TimePickerDialog(
                                         ctx,
@@ -293,10 +310,9 @@ fun SettingsScreen(
                                     ).show()
                                 },
                                 modifier = Modifier.weight(1f),
-                            ) {
-                                Text(tr("深色开始 ${fmtClockMin(prefs.darkStartMin)}", "Dark ${fmtClockMin(prefs.darkStartMin)}"))
-                            }
-                            OutlinedButton(
+                            )
+                            AppSecondaryButton(
+                                text = tr("浅色开始 ${fmtClockMin(prefs.darkEndMin)}", "Light ${fmtClockMin(prefs.darkEndMin)}"),
                                 onClick = {
                                     TimePickerDialog(
                                         ctx,
@@ -308,9 +324,7 @@ fun SettingsScreen(
                                     ).show()
                                 },
                                 modifier = Modifier.weight(1f),
-                            ) {
-                                Text(tr("浅色开始 ${fmtClockMin(prefs.darkEndMin)}", "Light ${fmtClockMin(prefs.darkEndMin)}"))
-                            }
+                            )
                         }
                         Text(
                             tr(
@@ -432,7 +446,8 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Button(
+                AppButton(
+                    text = tr("在浏览器中打开更新源", "Open Update Source in Browser"),
                     onClick = {
                         try {
                             ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl)))
@@ -440,7 +455,7 @@ fun SettingsScreen(
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(tr("在浏览器中打开更新源", "Open Update Source in Browser")) }
+                )
             }
 
             SettingsCard(tr("关于", "About")) {
@@ -455,10 +470,11 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedButton(
+                AppSecondaryButton(
+                    text = tr("重新查看首次引导与权限", "Reopen Setup Guide & Permissions"),
                     onClick = onOpenOnboarding,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(tr("重新查看首次引导与权限", "Reopen Setup Guide & Permissions")) }
+                )
             }
         }
     }
@@ -466,7 +482,19 @@ fun SettingsScreen(
 
 @Composable
 private fun SettingsCard(title: String, content: @Composable () -> Unit) {
-    if (LocalIsMiuix.current) {
+    if (LocalIsMiuixFull.current) {
+        Column(Modifier.fillMaxWidth()) {
+            MiuixSmallTitle(
+                text = title,
+                insideMargin = PaddingValues(start = 12.dp, top = 4.dp, bottom = 6.dp),
+            )
+            MiuixCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    content()
+                }
+            }
+        }
+    } else if (LocalIsMiuix.current) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 title,
