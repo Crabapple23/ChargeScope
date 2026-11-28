@@ -11,10 +11,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -107,7 +113,7 @@ internal fun DataTab() {
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             rootProvider = RootScanner.detectProvider(ctx)
-            ShizukuBridge.refreshState()
+            ShizukuBridge.refreshState(ctx)
         }
     }
     LaunchedEffect(recordedRows) {
@@ -233,9 +239,21 @@ internal fun DataTab() {
         Text(tr("记录文件大小上限（压缩后）", "Max Log File Size (GZIP)"), style = MaterialTheme.typography.labelLarge)
         Chips(MB_OPTS, maxMb) { maxMb = it; Prefs.setLong(ctx, Prefs.FILE_MB, it) }
     }
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val okGreen = if (isDark) Color(0xFF66BB6A) else Color(0xFF2E7D32)
+    val warnOrange = if (isDark) Color(0xFFFFB74D) else Color(0xFFEF6C00)
+    val privSummary = when (mode) {
+        1L -> if (rootError == null && privMsg?.contains("可用") == true) tr("Root · 已连接", "Root · Connected") else "Root"
+        2L -> when (shz) {
+            ShizukuBridge.State.READY -> tr("Shizuku · 已授权", "Shizuku · Ready")
+            ShizukuBridge.State.NO_PERMISSION -> tr("Shizuku · 待授权", "Shizuku · Auth Needed")
+            ShizukuBridge.State.NOT_RUNNING -> tr("Shizuku · 未运行", "Shizuku · Stopped")
+        }
+        else -> tr("已关闭", "Off")
+    }
     Fold(
         tr("特权增强", "Privileged Mode"),
-        when (mode) { 1L -> "Root"; 2L -> "Shizuku"; else -> tr("已关闭", "Off") },
+        privSummary,
     ) {
         Chips(privOpts, mode) {
             mode = it
@@ -253,53 +271,134 @@ internal fun DataTab() {
                 )
             }
             1L -> {
-                KV(
-                    tr("Root 管理器", "Root Manager"),
-                    rootProvider?.label ?: tr("未检测到", "Not detected"),
-                )
-                OutlinedButton(
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(tr("Root 管理器", "Root Manager"), style = MaterialTheme.typography.bodyMedium)
+                    val detected = rootProvider != null
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (detected) okGreen.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Text(
+                            text = rootProvider?.label ?: tr("未检测到", "Not detected"),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = if (detected) okGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+                Button(
                     enabled = !checking,
                     onClick = { Sampler.startProbe(ctx, 1) },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (checking) tr("正在检测…", "Probing…") else tr("检测 Root 授权", "Test Root Access")) }
+                ) { Text(if (checking) tr("正在检测连接…", "Testing…") else tr("申请并检测 Root 连接", "Request & Test Root")) }
                 Text(
                     tr(
-                        "支持 Magisk / KernelSU / APatch，复用单个持久 su 会话，仅执行固定只读探测。",
-                        "Supports Magisk / KernelSU / APatch via one persistent read-only su session.",
+                        "支持 Magisk / KernelSU / APatch，仅执行固定只读探测。授权弹窗点允许后若未自动刷新，请再点一次检测连接。",
+                        "Supports Magisk / KernelSU / APatch (read-only). Tap Test again if it doesn't refresh after granting.",
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             2L -> {
-                KV(tr("Shizuku 状态", "Shizuku Status"), shz.display(isEn))
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedButton(
-                        enabled = !checking,
-                        onClick = { ShizukuBridge.requestPermission() },
-                        modifier = Modifier.weight(1f),
-                    ) { Text(tr("申请授权", "Authorize")) }
-                    OutlinedButton(
+                    Text(tr("Shizuku 状态", "Shizuku Status"), style = MaterialTheme.typography.bodyMedium)
+                    val (pillText, pillFg) = when (shz) {
+                        ShizukuBridge.State.READY -> tr("已授权", "Authorized") to okGreen
+                        ShizukuBridge.State.NO_PERMISSION -> tr("待授权", "Needs Auth") to warnOrange
+                        ShizukuBridge.State.NOT_RUNNING -> tr("未运行", "Not Running") to MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (shz == ShizukuBridge.State.NOT_RUNNING) MaterialTheme.colorScheme.surfaceContainerHigh else pillFg.copy(alpha = 0.14f),
+                    ) {
+                        Text(
+                            text = pillText,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = pillFg,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+                Text(
+                    shz.display(isEn),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (shz == ShizukuBridge.State.READY) {
+                    Button(
                         enabled = !checking,
                         onClick = { Sampler.startProbe(ctx, 2) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text(if (checking) tr("检测中…", "Probing…") else tr("检测连接", "Test")) }
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(if (checking) tr("正在检测连接…", "Testing…") else tr("检测连接", "Test Connection")) }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            enabled = !checking && shz == ShizukuBridge.State.NO_PERMISSION,
+                            onClick = { ShizukuBridge.requestPermission(ctx) },
+                            modifier = Modifier.weight(1f),
+                        ) { Text(tr("申请授权", "Authorize")) }
+                        OutlinedButton(
+                            enabled = !checking,
+                            onClick = { Sampler.startProbe(ctx, 2) },
+                            modifier = Modifier.weight(1f),
+                        ) { Text(if (checking) tr("检测中…", "Probing…") else tr("检测连接", "Test")) }
+                    }
                 }
                 Text(
                     tr(
-                        "只读读取 sysfs 与系统充电服务；Android 14+ 部分机型 sysfs 受 SELinux 限制，完整节点需 Root。",
-                        "Reads sysfs and charging services read-only; on Android 14+ sysfs may be SELinux-restricted (full nodes require Root).",
+                        "授权后将自动尝试连接；若未自动刷新，请手动点击一次「检测连接」。Android 14+ 部分机型 sysfs 受 SELinux 限制，完整节点需 Root。",
+                        "Auto-connects after authorization; tap \"Test\" manually if it doesn't refresh. On Android 14+ sysfs may be SELinux-restricted (full nodes require Root).",
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
-        privMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
-        rootError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        val statusBannerText = when {
+            checking -> privMsg ?: tr("正在检测连接…", "Testing connection…")
+            privMsg != null -> privMsg
+            rootError != null -> rootError
+            else -> null
+        }
+        if (statusBannerText != null && mode != 0L) {
+            val isSuccess = !checking && rootError == null && statusBannerText.contains("可用")
+            val bannerFg = when {
+                checking -> MaterialTheme.colorScheme.primary
+                isSuccess -> okGreen
+                else -> MaterialTheme.colorScheme.error
+            }
+            val prefix = when {
+                checking -> "⏳ "
+                isSuccess -> "✓ "
+                else -> "⚠ "
+            }
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = bannerFg.copy(alpha = 0.12f),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = prefix + statusBannerText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = bannerFg,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
+        }
         Text(
             tr(
                 "安全说明：不写入任何系统节点；连续失败 3 次自动关闭。",

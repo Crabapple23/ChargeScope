@@ -497,8 +497,26 @@ object Sampler {
                     privGranted = false
                 }
             }
-            if (mode == 2) ShizukuBridge.refreshState()
-            if (mode != 0) sample(app)
+            if (mode == 2) {
+                val st = ShizukuBridge.refreshState(app)
+                if (st == ShizukuBridge.State.READY) startProbe(app, 2)
+            } else if (mode == 1) {
+                sample(app)
+            }
+        }
+    }
+
+    /** Auto-triggered when Shizuku permission is granted or binder becomes ready while Shizuku mode is selected. */
+    fun onShizukuAuthorized(ctx: Context) {
+        val app = ctx.applicationContext
+        if (Prefs.privMode(app) != 2) return
+        bgScope.launch {
+            mutex.withLock {
+                privFails = 0
+                privRetryAt = 0L
+                privError = null
+            }
+            startProbe(app, 2)
         }
     }
 

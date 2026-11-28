@@ -31,12 +31,19 @@ object ShizukuBridge {
     @Volatile private var listenersAdded = false
     @Volatile private var svc: IShellService? = null
     @Volatile private var pendingBind: CompletableDeferred<IShellService?>? = null
+    @Volatile private var appCtx: Context? = null
 
-    private val permListener = Shizuku.OnRequestPermissionResultListener { _, _ ->
-        refreshState()
+    private val permListener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+        val st = refreshState()
+        if (grantResult == PackageManager.PERMISSION_GRANTED || st == State.READY) {
+            appCtx?.let { Sampler.onShizukuAuthorized(it) }
+        }
     }
     private val receivedListener = Shizuku.OnBinderReceivedListener {
-        refreshState()
+        val st = refreshState()
+        if (st == State.READY) {
+            appCtx?.let { Sampler.onShizukuAuthorized(it) }
+        }
     }
     private val deadListener = Shizuku.OnBinderDeadListener {
         svc = null
@@ -72,14 +79,21 @@ object ShizukuBridge {
         }
     }
 
-    fun refreshState(): State {
+    fun refreshState(ctx: Context? = null): State {
+        if (ctx != null) appCtx = ctx.applicationContext
         val s = state()
         _state.value = s
         return s
     }
 
-    fun requestPermission() {
+    fun requestPermission(ctx: Context? = null) {
+        if (ctx != null) appCtx = ctx.applicationContext
         ensureListeners()
+        val st = refreshState()
+        if (st == State.READY) {
+            appCtx?.let { Sampler.onShizukuAuthorized(it) }
+            return
+        }
         try {
             Shizuku.requestPermission(REQ)
         } catch (_: Throwable) {

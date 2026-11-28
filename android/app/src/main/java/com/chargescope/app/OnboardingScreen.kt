@@ -123,7 +123,7 @@ fun OnboardingScreen(onFinish: () -> Unit) {
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             rootProvider = RootScanner.detectProvider(ctx)
-            ShizukuBridge.refreshState()
+            ShizukuBridge.refreshState(ctx)
         }
     }
 
@@ -133,7 +133,10 @@ fun OnboardingScreen(onFinish: () -> Unit) {
             if (event == Lifecycle.Event.ON_RESUME) {
                 notifGranted = hasNotificationPermission(ctx)
                 storageGranted = hasLegacyStoragePermission(ctx)
-                ShizukuBridge.refreshState()
+                val st = ShizukuBridge.refreshState(ctx)
+                if (selectedPriv == 2 && st == ShizukuBridge.State.READY && probeMsg == null) {
+                    Sampler.onShizukuAuthorized(ctx)
+                }
             }
         }
         lifecycle?.addObserver(observer)
@@ -264,7 +267,7 @@ fun OnboardingScreen(onFinish: () -> Unit) {
                             onRequestShizuku = {
                                 selectedPriv = 2
                                 Sampler.onPrivModeChanged(ctx, 2)
-                                ShizukuBridge.requestPermission()
+                                ShizukuBridge.requestPermission(ctx)
                             },
                             onProbeShizuku = {
                                 selectedPriv = 2
@@ -616,7 +619,11 @@ private fun StepPrivileged(
                 ) {
                     Text(tr("Shizuku 状态", "Shizuku Status"), style = MaterialTheme.typography.titleSmall)
                     StatusPill(
-                        text = if (shzState == ShizukuBridge.State.READY) tr("已就绪", "Ready") else tr("未就绪", "Not Ready"),
+                        text = when (shzState) {
+                            ShizukuBridge.State.READY -> tr("已授权", "Authorized")
+                            ShizukuBridge.State.NO_PERMISSION -> tr("待授权", "Needs Auth")
+                            ShizukuBridge.State.NOT_RUNNING -> tr("未运行", "Not Running")
+                        },
                         positive = shzState == ShizukuBridge.State.READY,
                     )
                 }
@@ -625,28 +632,47 @@ private fun StepPrivileged(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (shzState == ShizukuBridge.State.READY) {
                     Button(
                         enabled = !checking,
-                        onClick = onRequestShizuku,
-                        modifier = Modifier.weight(1f),
-                    ) { Text(tr("申请授权", "Authorize")) }
-                    OutlinedButton(
-                        enabled = !checking,
                         onClick = onProbeShizuku,
-                        modifier = Modifier.weight(1f),
-                    ) { Text(if (checking) tr("检测中…", "Probing…") else tr("检测连接", "Test")) }
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(if (checking) tr("正在检测连接…", "Testing…") else tr("检测连接", "Test Connection")) }
+                } else {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            enabled = !checking && shzState == ShizukuBridge.State.NO_PERMISSION,
+                            onClick = onRequestShizuku,
+                            modifier = Modifier.weight(1f),
+                        ) { Text(tr("申请授权", "Authorize")) }
+                        OutlinedButton(
+                            enabled = !checking,
+                            onClick = onProbeShizuku,
+                            modifier = Modifier.weight(1f),
+                        ) { Text(if (checking) tr("检测中…", "Probing…") else tr("检测连接", "Test")) }
+                    }
                 }
-            }
-            else -> {
                 Text(
                     tr(
-                        "检测到管理器：${rootProvider?.label ?: "未检测到 Magisk / KernelSU / APatch"}",
-                        "Manager: ${rootProvider?.label ?: "Magisk / KernelSU / APatch not detected"}",
+                        "提示：在 Shizuku 弹窗中点允许后将自动尝试连接；若未自动刷新，请手动点击一次「检测连接」。",
+                        "Tip: Connection is tested automatically after granting Shizuku access; tap \"Test\" manually if it doesn't refresh.",
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            else -> {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(tr("Root 管理器", "Root Manager"), style = MaterialTheme.typography.titleSmall)
+                    StatusPill(
+                        text = rootProvider?.label ?: tr("未检测到", "Not Found"),
+                        positive = rootProvider != null,
+                    )
+                }
                 Button(
                     enabled = !checking,
                     onClick = onProbeRoot,
@@ -654,14 +680,44 @@ private fun StepPrivileged(
                 ) {
                     Text(
                         if (checking) tr("正在检测 Root…", "Probing Root…")
-                        else tr("申请并检测 Root 授权", "Request & Test Root"),
+                        else tr("申请并检测 Root 连接", "Request & Test Root"),
                     )
                 }
+                Text(
+                    tr(
+                        "提示：首次授权弹出 Root 提示后请点允许；若超时未自动刷新，请再次点击检测连接。",
+                        "Tip: Tap Allow in the Root prompt; if it times out, tap Test again to verify.",
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 
-        probeMsg?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+        probeMsg?.let { msg ->
+            val isOk = msg.contains("可用")
+            val bg = when {
+                checking -> MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                isOk -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                else -> MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+            }
+            val fg = when {
+                checking -> MaterialTheme.colorScheme.primary
+                isOk -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.error
+            }
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = bg,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = msg,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = fg,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
         }
     }
 
