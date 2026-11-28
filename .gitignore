@@ -1,7 +1,3 @@
-# Rust
-native/target/
-**/*.rs.bk
-
 # Android / Gradle
 android/.gradle/
 android/local.properties
@@ -12,14 +8,8 @@ android/.idea/
 *.jks
 *.keystore
 
-# Generated UniFFI output (rebuild via scripts/build-rust.*)
-android/app/src/main/jniLibs/
-
 # IDE / OS
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
-
-# Temporary extraction dir used by the agent
-.workbuddy/tmp_docx/
