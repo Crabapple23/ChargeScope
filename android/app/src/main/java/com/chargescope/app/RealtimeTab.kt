@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 
 private val GRID_FRACTIONS = floatArrayOf(0f, 0.5f, 1f)
@@ -140,6 +141,10 @@ private fun PowerChart(series: Series) {
     }
     val maxV = niceMax(series.maxW)
     val small = MaterialTheme.typography.labelSmall
+    val density = LocalDensity.current
+    val stroke = remember(density) {
+        Stroke(width = with(density) { 2.2.dp.toPx() }, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    }
     val batPath = remember { Path() }
     val inPath = remember { Path() }
 
@@ -154,7 +159,6 @@ private fun PowerChart(series: Series) {
             Text("0 W", style = small)
         }
         Canvas(Modifier.weight(1f).fillMaxHeight()) {
-            val stroke = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
             for (f in GRID_FRACTIONS) {
                 val y = if (f == 1f) size.height - 1f else size.height * f
                 drawLine(grid, Offset(0f, y), Offset(size.width, y), 1f)

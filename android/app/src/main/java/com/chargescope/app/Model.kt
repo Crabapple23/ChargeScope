@@ -1,9 +1,13 @@
 package com.chargescope.app
 
+import androidx.compose.runtime.Immutable
+
 /** One power_supply node (or the synthetic "dumpsys" node) read through a privileged channel. */
+@Immutable
 data class RootNode(val name: String, val props: Map<String, String>)
 
 /** One sample. Missing values are null, never 0. */
+@Immutable
 data class Snapshot(
     val elapsedMs: Long,
     val wallMs: Long,
@@ -32,8 +36,10 @@ enum class Status(val label: String) {
     NOT_CHARGING("未连接充电器"),
 }
 
+@Immutable
 data class Evidence(val level: Int, val text: String)
 
+@Immutable
 data class Analysis(
     val status: Status,
     val headline: String,
@@ -55,6 +61,7 @@ data class Analysis(
     val candidateSpecs: List<String> = emptyList(),
 )
 
+@Immutable
 data class Metrics(
     val count: Int,
     val durationMs: Long,
@@ -64,6 +71,7 @@ data class Metrics(
     val avgTempDeci: Double?,
 )
 
+@Immutable
 data class InputInfo(
     val voltageUv: Long?,
     val currentUa: Long?,
@@ -74,6 +82,7 @@ data class InputInfo(
 )
 
 /** Chart data in watts (unboxed FloatArray). NaN marks a missing point. */
+@Immutable
 class Series(
     val batteryW: FloatArray,
     val inputW: FloatArray,
@@ -87,6 +96,7 @@ class Series(
     }
 }
 
+@Immutable
 data class ArchiveEntry(
     val wallMs: Long,
     val status: String,
@@ -104,6 +114,7 @@ data class ArchiveEntry(
     val note: String = "",
 )
 
+@Immutable
 data class UiState(
     val latest: Snapshot? = null,
     val batteryCurrentMa: Double? = null,

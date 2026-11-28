@@ -344,6 +344,9 @@ internal fun MiuixBottomBar(
     }
 }
 
+private val GlassCapsuleShape = RoundedCornerShape(31.dp)
+private val GlassLensShape = RoundedCornerShape(26.dp)
+
 /**
  * FlClash / iOS-style floating Liquid Glass capsule bottom bar.
  * On Android 12+ (API 31+), samples the live backdrop GraphicsLayer and applies GPU RenderEffect blur
@@ -358,81 +361,88 @@ internal fun LiquidGlassBottomBar(
     onSelect: (Int) -> Unit,
 ) {
     val canRealBlur = Build.VERSION.SDK_INT >= 31 && backdropLayer != null
-    val glassShape = RoundedCornerShape(31.dp)
+    val primaryColor = MaterialTheme.colorScheme.primary
     var barRootOffset by remember { mutableStateOf(Offset.Unspecified) }
     val currentSelected by rememberUpdatedState(selectedIndex)
     val currentOnSelect by rememberUpdatedState(onSelect)
 
-    // With real GPU backdrop blur, keep tint ultra-translucent so blurred content shines through.
-    val glassTint = if (dark) {
+    // Cache gradient brushes across recompositions to avoid per-frame allocations during animations.
+    val glassTint = remember(dark, canRealBlur) {
+        if (dark) {
+            Brush.verticalGradient(
+                listOf(
+                    Color(0xFF282A34).copy(alpha = if (canRealBlur) 0.44f else 0.84f),
+                    Color(0xFF14151C).copy(alpha = if (canRealBlur) 0.54f else 0.90f),
+                ),
+            )
+        } else {
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = if (canRealBlur) 0.46f else 0.88f),
+                    Color(0xFFEEF3FB).copy(alpha = if (canRealBlur) 0.36f else 0.82f),
+                ),
+            )
+        }
+    }
+    val topSheen = remember(dark) {
         Brush.verticalGradient(
-            listOf(
-                Color(0xFF282A34).copy(alpha = if (canRealBlur) 0.44f else 0.84f),
-                Color(0xFF14151C).copy(alpha = if (canRealBlur) 0.54f else 0.90f),
-            ),
-        )
-    } else {
-        Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = if (canRealBlur) 0.46f else 0.88f),
-                Color(0xFFEEF3FB).copy(alpha = if (canRealBlur) 0.36f else 0.82f),
-            ),
+            0f to Color.White.copy(alpha = if (dark) 0.18f else 0.55f),
+            0.42f to Color.Transparent,
+            1f to Color.Black.copy(alpha = if (dark) 0.14f else 0.03f),
         )
     }
-    // Luminous specular glass sheen along the top curve
-    val topSheen = Brush.verticalGradient(
-        0f to Color.White.copy(alpha = if (dark) 0.18f else 0.55f),
-        0.42f to Color.Transparent,
-        1f to Color.Black.copy(alpha = if (dark) 0.14f else 0.03f),
-    )
-    // Specular rim refraction border
-    val rimBorder = if (dark) {
-        Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.46f),
-                Color.White.copy(alpha = 0.10f),
-                Color.White.copy(alpha = 0.22f),
-            ),
-        )
-    } else {
-        Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.96f),
-                Color(0xFFC8D2E3).copy(alpha = 0.50f),
-                Color.White.copy(alpha = 0.82f),
-            ),
-        )
+    val rimBorder = remember(dark) {
+        if (dark) {
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.46f),
+                    Color.White.copy(alpha = 0.10f),
+                    Color.White.copy(alpha = 0.22f),
+                ),
+            )
+        } else {
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.96f),
+                    Color(0xFFC8D2E3).copy(alpha = 0.50f),
+                    Color.White.copy(alpha = 0.82f),
+                ),
+            )
+        }
     }
-    // Inner liquid lens pill highlight
-    val lensFill = if (dark) {
-        Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.22f),
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.26f),
-            ),
-        )
-    } else {
-        Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.88f),
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-            ),
-        )
+    val lensFill = remember(dark, primaryColor) {
+        if (dark) {
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.22f),
+                    primaryColor.copy(alpha = 0.26f),
+                ),
+            )
+        } else {
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.88f),
+                    primaryColor.copy(alpha = 0.16f),
+                ),
+            )
+        }
     }
-    val lensRim = if (dark) {
-        Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.42f),
-                Color.White.copy(alpha = 0.10f),
-            ),
-        )
-    } else {
-        Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.98f),
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
-            ),
-        )
+    val lensRim = remember(dark, primaryColor) {
+        if (dark) {
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.42f),
+                    Color.White.copy(alpha = 0.10f),
+                ),
+            )
+        } else {
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.98f),
+                    primaryColor.copy(alpha = 0.22f),
+                ),
+            )
+        }
     }
 
     Box(
@@ -451,11 +461,11 @@ internal fun LiquidGlassBottomBar(
                 }
                 .shadow(
                     elevation = if (dark) 18.dp else 14.dp,
-                    shape = glassShape,
+                    shape = GlassCapsuleShape,
                     ambientColor = Color.Black.copy(alpha = if (dark) 0.55f else 0.16f),
                     spotColor = Color.Black.copy(alpha = if (dark) 0.65f else 0.20f),
                 )
-                .clip(glassShape)
+                .clip(GlassCapsuleShape)
                 .pointerInput(tabs.size) {
                     detectHorizontalDragGestures { change, _ ->
                         val w = size.width.toFloat()
@@ -487,7 +497,7 @@ internal fun LiquidGlassBottomBar(
                     .matchParentSize()
                     .background(glassTint)
                     .background(topSheen)
-                    .border(width = 1.1.dp, brush = rimBorder, shape = glassShape),
+                    .border(width = 1.1.dp, brush = rimBorder, shape = GlassCapsuleShape),
             )
             // 3) Interactive fluid lens pill & tab items
             BoxWithConstraints(
@@ -508,13 +518,13 @@ internal fun LiquidGlassBottomBar(
                         .fillMaxHeight()
                         .shadow(
                             elevation = if (dark) 4.dp else 3.dp,
-                            shape = RoundedCornerShape(26.dp),
+                            shape = GlassLensShape,
                             ambientColor = Color.Black.copy(alpha = 0.12f),
                             spotColor = Color.Black.copy(alpha = 0.16f),
                         )
-                        .clip(RoundedCornerShape(26.dp))
+                        .clip(GlassLensShape)
                         .background(lensFill)
-                        .border(0.85.dp, lensRim, RoundedCornerShape(26.dp)),
+                        .border(0.85.dp, lensRim, GlassLensShape),
                 )
                 Row(
                     modifier = Modifier.fillMaxSize(),

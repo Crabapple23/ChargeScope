@@ -104,16 +104,16 @@ class ShellService : IShellService.Stub() {
         } else ""
         val combined = "$ihealth\n$bprops"
 
-        parseKeyNum(combined, Regex("""(?i)(?:batteryStateOfHealth|stateOfHealth)\s*[:=]\s*(\d+)"""))
+        parseKeyNum(combined, RE_SOH)
             ?.takeIf { it in 1..100 }
             ?.let { map["soh"] = it.toString() }
-        parseKeyNum(combined, Regex("""(?i)(?:batteryCycleCount|cycleCount)\s*[:=]\s*(\d+)"""))
+        parseKeyNum(combined, RE_CYCLE)
             ?.takeIf { it >= 0 }
             ?.let { map["cycle_count"] = it.toString() }
-        parseKeyNum(combined, Regex("""(?i)batteryFullCharge\s*[:=]\s*(\d+)"""))
+        parseKeyNum(combined, RE_FULL)
             ?.takeIf { it > 0 }
             ?.let { map["charge_full"] = it.toString() }
-        parseKeyNum(combined, Regex("""(?i)batteryFullChargeDesignCapacityUah\s*[:=]\s*(\d+)"""))
+        parseKeyNum(combined, RE_DESIGN)
             ?.takeIf { it > 0 }
             ?.let { map["charge_full_design"] = it.toString() }
 
@@ -122,9 +122,9 @@ class ShellService : IShellService.Stub() {
         if (!map.containsKey("charge_full")) {
             val stats = runCmd("dumpsys", "batterystats", "--charged", timeoutSec = 3, maxChars = 16_384)
             if (stats.isNotEmpty()) {
-                val learnedMax = Regex("""(?i)Max learned battery capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
-                val learnedLast = Regex("""(?i)Last learned battery capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
-                val learnedMin = Regex("""(?i)Min learned battery capacity:\s*(\d+)""").find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                val learnedMax = RE_LEARNED_MAX.find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                val learnedLast = RE_LEARNED_LAST.find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                val learnedMin = RE_LEARNED_MIN.find(stats)?.groupValues?.getOrNull(1)?.toLongOrNull()
                 val learned = learnedMax ?: learnedLast ?: learnedMin
                 if (learned != null && learned in 500..25_000) {
                     map["charge_full"] = (learned * 1000L).toString()
@@ -190,24 +190,21 @@ class ShellService : IShellService.Stub() {
         }
         val usbRaw = runCmd("dumpsys", "usb", timeoutSec = 3, maxChars = 16_384)
         if (usbRaw.isNotEmpty()) {
-            val usbRegex = Regex("""(?i)(port|role|power|mode|connect|pd|brick|contaminant|typec|charg|curr|volt|status)""")
-            val usbLines = usbRaw.lineSequence().filter { usbRegex.containsMatchIn(it) }.take(60).joinToString("\n")
+            val usbLines = usbRaw.lineSequence().filter { RE_USB_FILTER.containsMatchIn(it) }.take(60).joinToString("\n")
             if (usbLines.isNotEmpty()) {
                 sb.append("=== dumpsys usb ===\n").append(usbLines.take(3000)).append('\n')
             }
         }
         val statsRaw = runCmd("dumpsys", "batterystats", "--charged", timeoutSec = 3, maxChars = 16_384)
         if (statsRaw.isNotEmpty()) {
-            val statsRegex = Regex("""(?i)(capacity|estimated|learned|cycle|health|charge)""")
-            val statsLines = statsRaw.lineSequence().filter { statsRegex.containsMatchIn(it) }.take(40).joinToString("\n")
+            val statsLines = statsRaw.lineSequence().filter { RE_STATS_FILTER.containsMatchIn(it) }.take(40).joinToString("\n")
             if (statsLines.isNotEmpty()) {
                 sb.append("=== dumpsys batterystats (capacity) ===\n").append(statsLines.take(2000)).append('\n')
             }
         }
         val propsRaw = runCmd("getprop", timeoutSec = 3, maxChars = 65_536)
         if (propsRaw.isNotEmpty()) {
-            val propRegex = Regex("""(?i)(charge|charger|charging|battery|fastchg|vooc|superchg|ufcs|quick_charge|usb\.pd|miui\.power|micharge|hw\.power|oplus\.chg|vivo\.chg)""")
-            val propLines = propsRaw.lineSequence().filter { propRegex.containsMatchIn(it) }.take(80).joinToString("\n")
+            val propLines = propsRaw.lineSequence().filter { RE_PROP_FILTER.containsMatchIn(it) }.take(80).joinToString("\n")
             if (propLines.isNotEmpty()) {
                 sb.append("=== getprop (charging) ===\n").append(propLines.take(4000)).append('\n')
             }
@@ -224,6 +221,17 @@ class ShellService : IShellService.Stub() {
     }
 
     private companion object {
+        val RE_SOH = Regex("""(?i)(?:batteryStateOfHealth|stateOfHealth)\s*[:=]\s*(\d+)""")
+        val RE_CYCLE = Regex("""(?i)(?:batteryCycleCount|cycleCount)\s*[:=]\s*(\d+)""")
+        val RE_FULL = Regex("""(?i)batteryFullCharge\s*[:=]\s*(\d+)""")
+        val RE_DESIGN = Regex("""(?i)batteryFullChargeDesignCapacityUah\s*[:=]\s*(\d+)""")
+        val RE_LEARNED_MAX = Regex("""(?i)Max learned battery capacity:\s*(\d+)""")
+        val RE_LEARNED_LAST = Regex("""(?i)Last learned battery capacity:\s*(\d+)""")
+        val RE_LEARNED_MIN = Regex("""(?i)Min learned battery capacity:\s*(\d+)""")
+        val RE_USB_FILTER = Regex("""(?i)(port|role|power|mode|connect|pd|brick|contaminant|typec|charg|curr|volt|status)""")
+        val RE_STATS_FILTER = Regex("""(?i)(capacity|estimated|learned|cycle|health|charge)""")
+        val RE_PROP_FILTER = Regex("""(?i)(charge|charger|charging|battery|fastchg|vooc|superchg|ufcs|quick_charge|usb\.pd|miui\.power|micharge|hw\.power|oplus\.chg|vivo\.chg)""")
+
         val FIELDS = arrayOf(
             "type", "status", "online", "present", "capacity",
             "voltage_now", "current_now", "current_avg", "power_now",
