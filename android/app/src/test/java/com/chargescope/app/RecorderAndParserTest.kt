@@ -127,4 +127,16 @@ class RecorderAndParserTest {
         val s2 = s1.copy(rootNodes = listOf(RootNode("qcom-battery", mapOf("cycle_count" to "205"))))
         assertEquals(205, Analyzer.batteryCycleCount(s2))
     }
+
+    @Test fun scheduledDarkThemeHandlesOvernightAndSameDayWindows() {
+        // Overnight: 22:00 -> 07:00
+        assertTrue(isDarkBySchedule(22 * 60, 22 * 60, 7 * 60))
+        assertTrue(isDarkBySchedule(2 * 60, 22 * 60, 7 * 60))
+        assertFalse(isDarkBySchedule(7 * 60, 22 * 60, 7 * 60))
+        assertFalse(isDarkBySchedule(14 * 60, 22 * 60, 7 * 60))
+        // Same-day: 13:00 -> 18:00
+        assertTrue(isDarkBySchedule(15 * 60, 13 * 60, 18 * 60))
+        assertFalse(isDarkBySchedule(19 * 60, 13 * 60, 18 * 60))
+        assertEquals("07:05", fmtClockMin(7 * 60 + 5))
+    }
 }

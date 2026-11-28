@@ -1,9 +1,11 @@
 package com.chargescope.app
 
+import android.app.TimePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,7 +34,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class AppPrefs(
-    val themeMode: Int = 0, // 0 = follow system, 1 = light, 2 = dark
+    val themeMode: Int = 0, // 0 = follow system, 1 = light, 2 = dark, 3 = scheduled
+    val darkStartMin: Int = 22 * 60,
+    val darkEndMin: Int = 7 * 60,
     val fontTier: Int = 1,  // 0 = small, 1 = normal, 2 = large, 3 = xlarge
     val lang: String = "zh",
     val updateSource: Int = 0, // 0 = GitHub Releases, 1 = GitHub Actions
@@ -68,6 +72,8 @@ object AppSettings {
     fun load(ctx: Context) {
         _prefs.value = AppPrefs(
             themeMode = Prefs.themeMode(ctx),
+            darkStartMin = Prefs.darkStartMin(ctx),
+            darkEndMin = Prefs.darkEndMin(ctx),
             fontTier = Prefs.fontTier(ctx),
             lang = Prefs.lang(ctx),
             updateSource = Prefs.updateSource(ctx),
@@ -85,6 +91,14 @@ object AppSettings {
     fun setTheme(ctx: Context, v: Int) {
         Prefs.setThemeMode(ctx, v)
         _prefs.value = _prefs.value.copy(themeMode = v)
+    }
+
+    fun setDarkSchedule(ctx: Context, startMin: Int, endMin: Int) {
+        val s = startMin.coerceIn(0, 1439)
+        val e = endMin.coerceIn(0, 1439)
+        Prefs.setDarkStartMin(ctx, s)
+        Prefs.setDarkEndMin(ctx, e)
+        _prefs.value = _prefs.value.copy(darkStartMin = s, darkEndMin = e)
     }
 
     fun setFontTier(ctx: Context, v: Int) {
@@ -142,6 +156,17 @@ object AppSettings {
         }
     }
 }
+
+fun isDarkBySchedule(nowMin: Int, startMin: Int, endMin: Int): Boolean {
+    if (startMin == endMin) return false
+    return if (startMin < endMin) {
+        nowMin in startMin until endMin
+    } else {
+        nowMin >= startMin || nowMin < endMin
+    }
+}
+
+fun fmtClockMin(min: Int): String = "%02d:%02d".format(min / 60, min % 60)
 
 val LocalIsEn = compositionLocalOf { false }
 
@@ -235,10 +260,56 @@ fun SettingsScreen(
                         tr("跟随系统", "System") to 0,
                         tr("浅色", "Light") to 1,
                         tr("深色", "Dark") to 2,
+                        tr("定时切换", "Scheduled") to 3,
                     ),
                     selected = prefs.themeMode,
                     onSelect = { AppSettings.setTheme(ctx, it) },
                 )
+                AnimatedVisibility(visible = prefs.themeMode == 3) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    TimePickerDialog(
+                                        ctx,
+                                        { _, h, m -> AppSettings.setDarkSchedule(ctx, h * 60 + m, prefs.darkEndMin) },
+                                        prefs.darkStartMin / 60,
+                                        prefs.darkStartMin % 60,
+                                        true,
+                                    ).show()
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(tr("深色开始 ${fmtClockMin(prefs.darkStartMin)}", "Dark ${fmtClockMin(prefs.darkStartMin)}"))
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    TimePickerDialog(
+                                        ctx,
+                                        { _, h, m -> AppSettings.setDarkSchedule(ctx, prefs.darkStartMin, h * 60 + m) },
+                                        prefs.darkEndMin / 60,
+                                        prefs.darkEndMin % 60,
+                                        true,
+                                    ).show()
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(tr("浅色开始 ${fmtClockMin(prefs.darkEndMin)}", "Light ${fmtClockMin(prefs.darkEndMin)}"))
+                            }
+                        }
+                        Text(
+                            tr(
+                                "深色时段：${fmtClockMin(prefs.darkStartMin)} – ${fmtClockMin(prefs.darkEndMin)}（支持跨夜，到点自动切换）。",
+                                "Dark window: ${fmtClockMin(prefs.darkStartMin)} – ${fmtClockMin(prefs.darkEndMin)} (supports overnight, switches automatically).",
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 val dynSupported = Build.VERSION.SDK_INT >= 31
                 Row(
                     Modifier.fillMaxWidth(),

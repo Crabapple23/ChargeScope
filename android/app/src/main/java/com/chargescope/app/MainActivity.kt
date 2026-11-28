@@ -36,6 +36,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -68,6 +69,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.time.LocalTime
 import kotlin.coroutines.cancellation.CancellationException
 
 class MainActivity : ComponentActivity() {
@@ -127,9 +129,22 @@ private fun App() {
     var backEdge by remember { mutableIntStateOf(0) }
     var lastProtocolTapMs by remember { mutableLongStateOf(0L) }
 
+    var nowMin by remember { mutableIntStateOf(LocalTime.now().let { it.hour * 60 + it.minute }) }
+    LaunchedEffect(prefs.themeMode) {
+        if (prefs.themeMode == 3) {
+            while (isActive) {
+                val t = LocalTime.now()
+                nowMin = t.hour * 60 + t.minute
+                val delayMs = ((60 - t.second).coerceAtLeast(1) * 1000L)
+                delay(delayMs)
+            }
+        }
+    }
+
     val dark = when (prefs.themeMode) {
         1 -> false
         2 -> true
+        3 -> isDarkBySchedule(nowMin, prefs.darkStartMin, prefs.darkEndMin)
         else -> isSystemInDarkTheme()
     }
     val baseColors = when {

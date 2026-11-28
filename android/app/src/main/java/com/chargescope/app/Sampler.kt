@@ -48,9 +48,17 @@ object Prefs {
     fun autoRecord(c: Context): Boolean = sp(c).getBoolean("auto", true)
     fun setAutoRecord(c: Context, v: Boolean) = sp(c).edit().putBoolean("auto", v).apply()
 
-    /** 0 = follow system (default), 1 = light, 2 = dark */
+    /** 0 = follow system (default), 1 = light, 2 = dark, 3 = scheduled */
     fun themeMode(c: Context): Int = sp(c).getInt("theme", 0)
     fun setThemeMode(c: Context, v: Int) = sp(c).edit().putInt("theme", v).apply()
+
+    /** Minute of day [0..1439] when scheduled dark theme starts (default 22:00). */
+    fun darkStartMin(c: Context): Int = sp(c).getInt("dark_start_min", 22 * 60)
+    fun setDarkStartMin(c: Context, v: Int) = sp(c).edit().putInt("dark_start_min", v.coerceIn(0, 1439)).apply()
+
+    /** Minute of day [0..1439] when scheduled dark theme ends / light starts (default 07:00). */
+    fun darkEndMin(c: Context): Int = sp(c).getInt("dark_end_min", 7 * 60)
+    fun setDarkEndMin(c: Context, v: Int) = sp(c).edit().putInt("dark_end_min", v.coerceIn(0, 1439)).apply()
 
     /** 0 = small (0.88x), 1 = normal (1.0x, default), 2 = large (1.15x), 3 = xlarge (1.3x) */
     fun fontTier(c: Context): Int = sp(c).getInt("font_tier", 1)
