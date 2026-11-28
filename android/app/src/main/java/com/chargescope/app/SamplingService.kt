@@ -129,11 +129,11 @@ class SamplingService : Service() {
                     return@launch
                 }
                 if (n++ % 5 == 0) {
-                    val p = s?.let { Analyzer.powerMw(it, Prefs.dualCell(app)) }
+                    val pW = Sampler.state.value.batteryPowerW
                     val text = if (isEn()) {
-                        "Recording · ${s?.levelPct ?: "—"}%" + (p?.let { "  ·  %.1f W".format(it / 1000.0) } ?: "")
+                        "Recording · ${s?.levelPct ?: "—"}%" + (pW?.let { "  ·  %.1f W".format(it) } ?: "")
                     } else {
-                        "记录中 · 电量 ${s?.levelPct ?: "—"}%" + (p?.let { "  ·  %.1f W".format(it / 1000.0) } ?: "")
+                        "记录中 · 电量 ${s?.levelPct ?: "—"}%" + (pW?.let { "  ·  %.1f W".format(it) } ?: "")
                     }
                     postNote(text, showStopAction = true)
                 }
